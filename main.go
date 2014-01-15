@@ -74,29 +74,30 @@ type bid struct {
 	accepted chan bool
 }
 
-func agentTrader(startCash float32, job *productionSet, agentStatusOut chan<- *agentStatus,
-	agentAsk chan<- *[]ask, agentBid chan<- *[]bid) {
-	funds := startCash
-	inventory := map[*commodity]int
-	priceBelief := map[*commodity]priceRange
-	asks := []ask
-	bids := []bid
-	//Loop forever, or until we die (AKA run out of money)
-	for {
-		//First, try and perform production
-		performProduction(job,*inventory)
-		
-		//TODO: Think about this more - we need a clean way of sending in a whole
-		//set of bids and asks, then receiving whether or not they were successful.
-		
-		//Then, generate offers
-		asks = generateAsks(job,*inventory)
-		bids = generateBids(job,*inventory)
-		//Send the offers in
-		agentAsks <- asks
-		agentBids <- bids
-	}
-}
+//func agentTrader(startCash float32, job *productionSet, agentStatusOut chan<- *agentStatus,
+//	agentAsk chan<- *[]ask, agentBid chan<- *[]bid) {
+
+//	funds := startCash
+//	inventory = make(map[*commodity]int)
+//	priceBelief := make(map[*commodity]priceRange)
+//	asks := make([]ask)
+//	bids := make([]bid)
+//	//Loop forever, or until we die (AKA run out of money)
+//	for {
+//		//First, try and perform production
+//		performProduction(job, *inventory)
+
+//		//TODO: Think about this more - we need a clean way of sending in a whole
+//		//set of bids and asks, then receiving whether or not they were successful.
+
+//		//Then, generate offers
+//		asks = generateAsks(job, *inventory)
+//		bids = generateBids(job, *inventory)
+//		//Send the offers in
+//		agentAsks <- asks
+//		agentBids <- bids
+//	}
+//}
 
 func main() {
 	fmt.Println("Hello World!")
