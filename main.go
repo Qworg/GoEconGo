@@ -154,6 +154,30 @@ func getExpectedValue(method *productionMethod) float32 {
 	return expectedValue
 }
 
+//This generates the average process value for a particular productionNumber of
+//agent productions.
+func getAgentAverageProductionValue(agent *traderAgent, productionNumber int) float32 {
+	var productionValue float32 = 0
+	method := agent.job.methods[productionNumber]
+	//Get the upside
+	for _, outputs := range method.outputs {
+		productionValue = productionValue + float32(outputs.quantity)*
+			((agent.priceBelief[outputs.item].high+agent.priceBelief[outputs.item].low)/2)
+	}
+	//Calculate the cost of inputs and subtract
+	for _, inputs := range method.inputs {
+		productionValue = productionValue - float32(inputs.quantity)*
+			((agent.priceBelief[inputs.item].high+agent.priceBelief[inputs.item].low)/2)
+	}
+	//Calculate the catalyst costs and subtract
+	for index, catalysts := range method.catalysts {
+		productionValue = productionValue - float32(catalysts.quantity)*method.consumption[index]*
+			((agent.priceBelief[catalysts.item].high+agent.priceBelief[catalysts.item].low)/2)
+	}
+
+	return productionValue
+}
+
 //performProduction handles the production of the agent
 //Given a production set, which contains a set of production methods, the agent
 //solves for the most expected value, given their internal belief of the commodity
