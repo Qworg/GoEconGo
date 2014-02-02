@@ -155,7 +155,8 @@ func getExpectedValue(method *productionMethod) float32 {
 }
 
 //This generates the average process value for a particular productionNumber of
-//agent productions.
+//agent productions.  This is calculated by averaging the agent's high and low price
+//values.
 func getAgentAverageProductionValue(agent *traderAgent, productionNumber int) float32 {
 	var productionValue float32 = 0
 	method := agent.job.methods[productionNumber]
