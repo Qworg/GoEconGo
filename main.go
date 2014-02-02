@@ -74,30 +74,46 @@ type bid struct {
 	accepted chan bool
 }
 
-//func agentTrader(startCash float32, job *productionSet, agentStatusOut chan<- *agentStatus,
-//	agentAsk chan<- *[]ask, agentBid chan<- *[]bid) {
+//A agentExecutor is a worker that performs a single step of an independent agent.
+//It performs production, then sets up the bids and asks for that agent.
+//agent - a pointer to a traderAgent
+//func agentExecutor(agent *traderAgent) {
 
-//	funds := startCash
-//	inventory = make(map[*commodity]int)
-//	priceBelief := make(map[*commodity]priceRange)
-//	asks := make([]ask)
-//	bids := make([]bid)
-//	//Loop forever, or until we die (AKA run out of money)
-//	for {
-//		//First, try and perform production
-//		performProduction(job, *inventory)
+//	var asks []ask
+//	var bids []bid
 
-//		//TODO: Think about this more - we need a clean way of sending in a whole
-//		//set of bids and asks, then receiving whether or not they were successful.
+//	performProduction(agent.job, agent.inventory)
 
-//		//Then, generate offers
-//		asks = generateAsks(job, *inventory)
-//		bids = generateBids(job, *inventory)
-//		//Send the offers in
-//		agentAsks <- asks
-//		agentBids <- bids
-//	}
 //}
+
+//agentRun is the execution part of the traderAgent struct.
+//It performs production, sets up bids and asks, receives data back, updates
+//inventories and cash on hand and updates beliefs.
+//agent - a traderAgent struct
+//agentStatusOut - an outbound channel for returning agentStatus
+//agentAsk - an outbound channel for asks
+//agentBid - an outbound channel for bids
+func agentRun(agent traderAgent, agentStatusOut chan<- *agentStatus, agentAsk chan<- *[]ask, agentBid chan<- *[]bid) {
+	var asks []ask
+	var bids []bid
+	//	asks := make([]ask)
+	//	bids := make([]bid)
+	//	//Loop forever, or until we die (AKA run out of money)
+	//	for {
+	//		//First, try and perform production
+	//		performProduction(job, *inventory)
+
+	//		//TODO: Think about this more - we need a clean way of sending in a whole
+	//		//set of bids and asks, then receiving whether or not they were successful.
+
+	//		//Then, generate offers
+	//		asks = generateAsks(job, *inventory)
+	//		bids = generateBids(job, *inventory)
+	//		//Send the offers in
+	//		agentAsks <- asks
+	//		agentBids <- bids
+	//	}
+}
 
 func main() {
 	fmt.Println("Hello World!")
