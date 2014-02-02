@@ -47,8 +47,8 @@ type productionMethod struct {
 
 //A productionSet is a collection of similar productionMethods for producing a
 //commodity.
-//methods - all of the available productionMethods in this set (slice of pointers
-//to productionMethod)
+//methods - all of the available productionMethods in this set (slice of
+//productionMethod)
 //penalty - cost of not following this production set (float32)
 type productionSet struct {
 	methods []*productionMethod
@@ -126,17 +126,16 @@ func agentRun(agent traderAgent, agentAsks chan *[]asks, agentBids chan *[]bids,
 	agentAlive <- alive
 }
 
-//This is the definition of the sort for expected value sorting.
-type ByExpectedValue []*productionMethod
+//This is the definition of the sort for market value sorting.
+type ByMarketValue []*productionMethod
 
-func (a ByExpectedValue) Len() int           { return len(a) }
-func (a ByExpectedValue) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
-func (a ByExpectedValue) Less(i, j int) bool { return getExpectedValue(a[i]) < getExpectedValue(a[j]) }
+func (a ByMarketValue) Len() int           { return len(a) }
+func (a ByMarketValue) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
+func (a ByMarketValue) Less(i, j int) bool { return getMarketValue(a[i]) < getMarketValue(a[j]) }
 
-//This is the heavy lifter of the sorting algo.  I expect this probably will need
-//to be rewritten. NOTE: THIS USES AVERAGE MARKET PRICE.  THIS IS PROBABLY NOT
-//CORRECT.  IT SHOULD REFLECT BELIEF OF AGENT.
-func getExpectedValue(method *productionMethod) float32 {
+//This is a market value calculator for a particular production method.  It calculates
+//it purely from public information.
+func getMarketValue(method *productionMethod) float32 {
 	var expectedValue float32 = 0
 	//Get the upside
 	for _, outputs := range method.outputs {
@@ -148,7 +147,8 @@ func getExpectedValue(method *productionMethod) float32 {
 	}
 	//Calculate the catalyst costs and subtract
 	for index, catalysts := range method.catalysts {
-		expectedValue = expectedValue - float32(catalysts.quantity)*method.consumption[index]*catalysts.item.averagePrice
+		expectedValue = expectedValue - float32(catalysts.quantity)*method.consumption[index]*
+			catalysts.item.averagePrice
 	}
 
 	return expectedValue
@@ -157,7 +157,7 @@ func getExpectedValue(method *productionMethod) float32 {
 //This generates the average process value for a particular productionNumber of
 //agent productions.  This is calculated by averaging the agent's high and low price
 //values.
-func getAgentAverageProductionValue(agent *traderAgent, productionNumber int) float32 {
+func getAverageProductionValue(agent *traderAgent, productionNumber int) float32 {
 	var productionValue float32 = 0
 	method := agent.job.methods[productionNumber]
 	//Get the upside
@@ -186,8 +186,8 @@ func getAgentAverageProductionValue(agent *traderAgent, productionNumber int) fl
 //execute the next highest value activity.  Idle agents are fined the idle penalty
 //of their productionSet.
 func performProduction(agent *traderAgent) {
-	//This is a sorting of methods by expected value.
-	sort.Sort(ByExpectedValue(agent.job.methods))
+	//This is a sorting of methods by market value.
+	sort.Sort(ByMarketValue(agent.job.methods))
 	//Attempt to execute methods in order of expected value.  If failing to execute,
 	//apply penalty.
 	accepted := false
@@ -246,6 +246,14 @@ func performProduction(agent *traderAgent) {
 //make in this round of trading.
 func generateAsks(agent *traderAgent) []asks {
 	var askSlice []asks
+
+	//Trader asks themselves what will make them the most money.
+	//TODO: OK, this is the beginning of the next part to work on.  I need to finish
+	//generateAsks, generateBids, and agentUpdate, as well as create the auction house.
+	//I then need to make them all play nice with each other over channels (as shown)
+	//for index, method := range agent.job.methods {
+
+	//}
 
 	return askSlice
 }
