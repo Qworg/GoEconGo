@@ -62,11 +62,14 @@ type productionSet struct {
 //priceBelief - an agent's belief of the current price range of commodities
 //(map of pointer to commodity to priceRange)
 //funds - the amount of cash on hand
+//riskAversion - the level of look ahead in value during bidding in case of failed
+//bids.  Lower is more risky (since you could blow a bid)
 type traderAgent struct {
-	job         *productionSet
-	inventory   map[*commodity]int
-	priceBelief map[*commodity]priceRange
-	funds       float32
+	job          *productionSet
+	inventory    map[*commodity]int
+	priceBelief  map[*commodity]priceRange
+	funds        float32
+	riskAversion int
 }
 
 type ask struct {
@@ -80,15 +83,60 @@ type bid struct {
 }
 
 type asks struct {
-	offeredAsk     *ask
+	offeredAsk     ask
 	numberOffered  int
 	numberAccepted int
 }
 
 type bids struct {
-	offeredBid     *bid
+	offeredBid     bid
 	numberOffered  int
 	numberAccepted int
+}
+
+//Borrowed from Andy Balholm
+type sortedProductionValueMap struct {
+	m  map[*productionMethod]float32
+	pv []*productionMethod
+}
+
+func (sm *sortedProductionValueMap) Len() int {
+	return len(sm.m)
+}
+
+func (sm *sortedProductionValueMap) Less(i, j int) bool {
+	return sm.m[sm.pv[i]] > sm.m[sm.pv[j]]
+}
+
+func (sm *sortedProductionValueMap) Swap(i, j int) {
+	sm.pv[i], sm.pv[j] = sm.pv[j], sm.pv[i]
+}
+
+func sortedPVKeys(m map[*productionMethod]float32) []*productionMethod {
+	sm := new(sortedProductionValueMap)
+	sm.m = m
+	sm.pv = make([]*productionMethod, len(m))
+	i := 0
+	for key, _ := range m {
+		sm.pv[i] = key
+		i++
+	}
+	sort.Sort(sm)
+	return sm.pv
+}
+
+//commodityQuantity map concat
+func cQMapConcat(mA map[*commodity]int, mB map[*commodity]int) map[*commodity]int {
+	//This performs a deep concat of two *commodity -> int maps, adding the ints
+	//together if they exist, while adding the keys that don't.
+	mOut := mA
+
+	for k, v := range mB {
+		mOut[k] = mOut[k] + v
+	}
+
+	return mOut
+
 }
 
 //agentRun is the execution part of the traderAgent struct.
@@ -159,6 +207,10 @@ func getMarketValue(method *productionMethod) float32 {
 //values.
 func getAverageProductionValue(agent *traderAgent, productionNumber int) float32 {
 	var productionValue float32 = 0
+	if productionNumber >= len(agent.job.methods) {
+		//ERROR!  Production number is out of bounds.
+		return -1
+	}
 	method := agent.job.methods[productionNumber]
 	//Get the upside
 	for _, outputs := range method.outputs {
@@ -179,6 +231,17 @@ func getAverageProductionValue(agent *traderAgent, productionNumber int) float32
 	return productionValue
 }
 
+func getAllAverageProductionValues(agent *traderAgent) map[*productionMethod]float32 {
+	pvm := make(map[*productionMethod]float32)
+
+	for index, method := range agent.job.methods {
+		pvm[method] = getAverageProductionValue(agent, index)
+	}
+
+	return pvm
+
+}
+
 //performProduction handles the production of the agent
 //Given a production set, which contains a set of production methods, the agent
 //solves for the most expected value, given their internal belief of the commodity
@@ -187,6 +250,8 @@ func getAverageProductionValue(agent *traderAgent, productionNumber int) float32
 //of their productionSet.
 func performProduction(agent *traderAgent) {
 	//This is a sorting of methods by market value.
+	//BUG: This is incorrect.  However, I will test with an incorrect assumption
+	//and fix it going forward.
 	sort.Sort(ByMarketValue(agent.job.methods))
 	//Attempt to execute methods in order of expected value.  If failing to execute,
 	//apply penalty.
@@ -238,6 +303,41 @@ func performProduction(agent *traderAgent) {
 	}
 }
 
+//gatherAllRequirements takes an agent's job list and returns a set of requirements
+//from all of them.
+//These requirements are the minimum necessary to do all the agent's jobs.
+//agent - a pointer to a traderAgent dataset
+//commodityNeeds - a map of commodity pointers to quantity in int
+func gatherAllRequirements(agent *traderAgent) map[*commodity]int {
+	commodityNeeds := make(map[*commodity]int)
+
+	for _, method := range agent.job.methods {
+		for _, inputs := range method.inputs {
+			commodityNeeds[inputs.item] = commodityNeeds[inputs.item] + inputs.quantity
+		}
+		for _, catalysts := range method.catalysts {
+			commodityNeeds[catalysts.item] = commodityNeeds[catalysts.item] + catalysts.quantity
+		}
+	}
+
+	return commodityNeeds
+}
+
+//gatherRequirements takes a particular job and returns a set of requirements to
+//complete that job.
+func gatherRequirements(pm *productionMethod) map[*commodity]int {
+	pmn := make(map[*commodity]int)
+
+	for _, inputs := range pm.inputs {
+		pmn[inputs.item] = pmn[inputs.item] + inputs.quantity
+	}
+	for _, catalysts := range pm.catalysts {
+		pmn[catalysts.item] = pmn[catalysts.item] + catalysts.quantity
+	}
+
+	return pmn
+}
+
 //generateAsks creates asks for the agent to place in the marketplace and sell its
 //goods.  These asks are based on the agent's current belief of the price modulated
 //by the current price average.
@@ -246,14 +346,27 @@ func performProduction(agent *traderAgent) {
 //make in this round of trading.
 func generateAsks(agent *traderAgent) []asks {
 	var askSlice []asks
+	//gather any possible requirements for production
+	cnm := gatherAllRequirements(agent)
 
-	//Trader asks themselves what will make them the most money.
-	//TODO: OK, this is the beginning of the next part to work on.  I need to finish
-	//generateAsks, generateBids, and agentUpdate, as well as create the auction house.
-	//I then need to make them all play nice with each other over channels (as shown)
-	//for index, method := range agent.job.methods {
-
-	//}
+	//sell everything else in inventory
+	for com, num := range agent.inventory {
+		_, ok := cnm[com]
+		//ok is false if this inventory item is not in required items.
+		//That means we should try and sell it.
+		if !ok {
+			var askBuild asks
+			askBuild.numberAccepted = 0
+			askBuild.numberOffered = num
+			askBuild.offeredAsk.item = com
+			//So, given the average price on the exchange, what should we sell for?
+			//This instantiation sells for the average of my price belief and the
+			//exchange average.
+			askBuild.offeredAsk.sellFor = (agent.priceBelief[com].high + agent.priceBelief[com].low +
+				com.averagePrice) / 3
+			askSlice = append(askSlice, askBuild)
+		}
+	}
 
 	return askSlice
 }
@@ -261,8 +374,47 @@ func generateAsks(agent *traderAgent) []asks {
 func generateBids(agent *traderAgent) []bids {
 	var bidSlice []bids
 
+	//Trader asks themselves what will make them the most money.
+	pvm := getAllAverageProductionValues(agent)
+	spv := sortedPVKeys(pvm)
+
+	//Take the top "riskAversion" number of possible production methods and make
+	//sure we can cover at least two cycles with them.
+	cyclesToCover := 2
+	invReqs := make(map[*commodity]int)
+	for i := 0; i < agent.riskAversion; i++ {
+		for j := 0; j < cyclesToCover; j++ {
+			invReqs = cQMapConcat(gatherRequirements(spv[i]), invReqs)
+		}
+	}
+
+	//Now that we know what we need, let's see remove what we've already got.
+	for com, num := range agent.inventory {
+		_, ok := invReqs[com]
+		if ok {
+			invReqs[com] = invReqs[com] - num
+		}
+	}
+
+	//Now trimmed, let's bid for all the stuff in invReqs
+	for com, num := range invReqs {
+		var bidBuild bids
+		bidBuild.numberOffered = num
+		bidBuild.offeredBid.item = com
+		//So, given the average price on the exchange, what should we buy at?
+		//This instantiation buys at the average of my price belief and the
+		//exchange average.
+		bidBuild.offeredBid.buyFor = (agent.priceBelief[com].high + agent.priceBelief[com].low +
+			com.averagePrice) / 3
+		bidSlice = append(bidSlice, bidBuild)
+	}
+
 	return bidSlice
 }
+
+//TODO: OK, this is the beginning of the next part to work on.  I need to finish
+//agentUpdate, as well as create the auction house. I then need to make them all
+//play nice with each other over channels (as shown)
 
 func agentUpdate(agent *traderAgent, askSlice *[]asks, bidSlice *[]bids) {
 
