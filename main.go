@@ -371,6 +371,12 @@ func generateAsks(agent *traderAgent) []asks {
 	return askSlice
 }
 
+//generateBids creates bids for the agent to place in the marketplace and buy more
+//goods.  These bids are based on the agent's current belief of the price modulated
+//by the current price average.
+//agent - a pointer to a traderAgent dataset
+//bidSlice - a return slice of asks.  This contains all of the bids the trader will
+//make in this round of trading.
 func generateBids(agent *traderAgent) []bids {
 	var bidSlice []bids
 
