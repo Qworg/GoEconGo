@@ -5,6 +5,7 @@ import (
 	"fmt"
 	//"math/rand"
 	"runtime"
+	"time"
 )
 
 //A commodity is traded by traderAgents and used in production sets.
@@ -62,14 +63,27 @@ type traderAgent struct {
 	funds       float32
 }
 
+
+//An ask is a request to the market to sell an item at a given price.
+//item - a pointer to a commodity that is being sold
+//quantity - a number of units to sell
+//sellFor - a price to sell that commodity at
+//accepted - a channel to feed back results to the agent
 type ask struct {
 	item     *commodity
+	quantity int
 	sellFor  float32
 	accepted chan bool
 }
 
+//A bid is a request to the market to buy a commodity at a given price.
+//item - a pointer to a commodity that we wish to purchase
+//quantity - the number of units to attempt to buy
+//buyFor - a price to buy that commodity for
+//accepted - a channel to feed back results to the agent
 type bid struct {
 	item     *commodity
+	quantity int
 	buyFor   float32
 	accepted chan bool
 }
@@ -101,6 +115,18 @@ type bid struct {
 
 func main() {
 	fmt.Println("Hello World!")
+	fmt.Println("Set up a ticker!")
+	
+	ticker := time.NewTicker(time.Millisecond * 100)
+	
+	go func() {
+		for t := range ticker.C {
+			fmt.Println("tick at", t)
+		}
+	}()
+
+	//Block forever
+	select{}
 }
 
 //Set up our agent system/world state in here.
