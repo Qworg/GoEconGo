@@ -72,29 +72,28 @@ type traderAgent struct {
 	riskAversion int
 }
 
-
 //An ask is a request to the market to sell an item at a given price.
 //item - a pointer to a commodity that is being sold
-//quantity - a number of units to sell
+//quantity - a number of units to sell in this ask
 //sellFor - a price to sell that commodity at
-//accepted - a channel to feed back results to the agent
+//accepted - whether or not this ask was successful //a channel to feed back results to the agent
 type ask struct {
 	item     *commodity
 	quantity int
 	sellFor  float32
-	accepted chan bool
+	accepted bool
 }
 
 //A bid is a request to the market to buy a commodity at a given price.
 //item - a pointer to a commodity that we wish to purchase
-//quantity - the number of units to attempt to buy
+//quantity - the number of units to attempt to buy in this bid
 //buyFor - a price to buy that commodity for
-//accepted - a channel to feed back results to the agent
+//accepted - whether or not this bid was successful //a channel to feed back results to the agent
 type bid struct {
 	item     *commodity
 	quantity int
 	buyFor   float32
-	accepted chan bool
+	accepted bool
 }
 
 //func agentTrader(startCash float32, job *productionSet, agentStatusOut chan<- *agentStatus,
@@ -463,15 +462,23 @@ func generateBids(agent *traderAgent) []bids {
 //play nice with each other over channels (as shown)
 
 func agentUpdate(agent *traderAgent, askSlice *[]asks, bidSlice *[]bids) {
-
+	//Go through all the asks and tally up the sales/remove items from inventory.
+	//If not accepted, lower sales price internal estimate
+	for _, askSet := range askSlice {
+		if askSet.offeredAsk.accepted {
+			//AskSet was accepted!  Take out that much inventory and add cash.
+			traderAgent.funds = traderAgent.funds + (askSet.offeredAsk.quantity * askSet.offeredAsk.numberAccepted * askSet.offeredAsk.sellFor)
+			traderAgent.inventory
+		}
+	}
 }
 
 func main() {
 	fmt.Println("Hello World!")
 	fmt.Println("Set up a ticker!")
-	
+
 	ticker := time.NewTicker(time.Millisecond * 100)
-	
+
 	go func() {
 		for t := range ticker.C {
 			fmt.Println("tick at", t)
@@ -479,7 +486,7 @@ func main() {
 	}()
 
 	//Block forever
-	select{}
+	select {}
 }
 
 //Set up our agent system/world state in here.
