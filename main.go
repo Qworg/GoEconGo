@@ -3,6 +3,7 @@ package main
 
 import (
 	"fmt"
+	"math"
 	"math/rand"
 	"runtime"
 	"sort"
@@ -14,13 +15,13 @@ import (
 //averagePrice - current average price of the commodity
 type commodity struct {
 	name         string
-	averagePrice float32
+	averagePrice float64
 }
 
 //A priceRange simply captures the low and high price beliefs of an agent
 type priceRange struct {
-	low  float32
-	high float32
+	low  float64
+	high float64
 }
 
 //A commoditySet simply is a number of the same commodity
@@ -42,17 +43,17 @@ type productionMethod struct {
 	inputs      []commoditySet
 	catalysts   []commoditySet
 	outputs     []commoditySet
-	consumption []float32
+	consumption []float64
 }
 
 //A productionSet is a collection of similar productionMethods for producing a
 //commodity.
 //methods - all of the available productionMethods in this set (slice of
 //productionMethod)
-//penalty - cost of not following this production set (float32)
+//penalty - cost of not following this production set (float64)
 type productionSet struct {
 	methods []*productionMethod
-	penalty float32
+	penalty float64
 }
 
 //A traderAgent is an independent agent.  It has a job (productionSet), an inventory,
@@ -68,7 +69,7 @@ type traderAgent struct {
 	job          *productionSet
 	inventory    map[*commodity]int
 	priceBelief  map[*commodity]priceRange
-	funds        float32
+	funds        float64
 	riskAversion int
 }
 
@@ -80,8 +81,7 @@ type traderAgent struct {
 type ask struct {
 	item     *commodity
 	quantity int
-	sellFor  float32
-	accepted bool
+	sellFor  float64
 }
 
 //A bid is a request to the market to buy a commodity at a given price.
@@ -92,11 +92,10 @@ type ask struct {
 type bid struct {
 	item     *commodity
 	quantity int
-	buyFor   float32
-	accepted bool
+	buyFor   float64
 }
 
-//func agentTrader(startCash float32, job *productionSet, agentStatusOut chan<- *agentStatus,
+//func agentTrader(startCash float64, job *productionSet, agentStatusOut chan<- *agentStatus,
 //	agentAsk chan<- *[]ask, agentBid chan<- *[]bid) {
 
 //	funds := startCash
@@ -135,7 +134,7 @@ type bids struct {
 
 //Borrowed from Andy Balholm
 type sortedProductionValueMap struct {
-	m  map[*productionMethod]float32
+	m  map[*productionMethod]float64
 	pv []*productionMethod
 }
 
@@ -151,7 +150,7 @@ func (sm *sortedProductionValueMap) Swap(i, j int) {
 	sm.pv[i], sm.pv[j] = sm.pv[j], sm.pv[i]
 }
 
-func sortedPVKeys(m map[*productionMethod]float32) []*productionMethod {
+func sortedPVKeys(m map[*productionMethod]float64) []*productionMethod {
 	sm := new(sortedProductionValueMap)
 	sm.m = m
 	sm.pv = make([]*productionMethod, len(m))
@@ -222,19 +221,19 @@ func (a ByMarketValue) Less(i, j int) bool { return getMarketValue(a[i]) < getMa
 
 //This is a market value calculator for a particular production method.  It calculates
 //it purely from public information.
-func getMarketValue(method *productionMethod) float32 {
-	var expectedValue float32 = 0
+func getMarketValue(method *productionMethod) float64 {
+	var expectedValue float64 = 0
 	//Get the upside
 	for _, outputs := range method.outputs {
-		expectedValue = expectedValue + float32(outputs.quantity)*outputs.item.averagePrice
+		expectedValue = expectedValue + float64(outputs.quantity)*outputs.item.averagePrice
 	}
 	//Calculate the cost of inputs and subtract
 	for _, inputs := range method.inputs {
-		expectedValue = expectedValue - float32(inputs.quantity)*inputs.item.averagePrice
+		expectedValue = expectedValue - float64(inputs.quantity)*inputs.item.averagePrice
 	}
 	//Calculate the catalyst costs and subtract
 	for index, catalysts := range method.catalysts {
-		expectedValue = expectedValue - float32(catalysts.quantity)*method.consumption[index]*
+		expectedValue = expectedValue - float64(catalysts.quantity)*method.consumption[index]*
 			catalysts.item.averagePrice
 	}
 
@@ -244,8 +243,8 @@ func getMarketValue(method *productionMethod) float32 {
 //This generates the average process value for a particular productionNumber of
 //agent productions.  This is calculated by averaging the agent's high and low price
 //values.
-func getAverageProductionValue(agent *traderAgent, productionNumber int) float32 {
-	var productionValue float32 = 0
+func getAverageProductionValue(agent *traderAgent, productionNumber int) float64 {
+	var productionValue float64 = 0
 	if productionNumber >= len(agent.job.methods) {
 		//ERROR!  Production number is out of bounds.
 		return -1
@@ -253,25 +252,25 @@ func getAverageProductionValue(agent *traderAgent, productionNumber int) float32
 	method := agent.job.methods[productionNumber]
 	//Get the upside
 	for _, outputs := range method.outputs {
-		productionValue = productionValue + float32(outputs.quantity)*
+		productionValue = productionValue + float64(outputs.quantity)*
 			((agent.priceBelief[outputs.item].high+agent.priceBelief[outputs.item].low)/2)
 	}
 	//Calculate the cost of inputs and subtract
 	for _, inputs := range method.inputs {
-		productionValue = productionValue - float32(inputs.quantity)*
+		productionValue = productionValue - float64(inputs.quantity)*
 			((agent.priceBelief[inputs.item].high+agent.priceBelief[inputs.item].low)/2)
 	}
 	//Calculate the catalyst costs and subtract
 	for index, catalysts := range method.catalysts {
-		productionValue = productionValue - float32(catalysts.quantity)*method.consumption[index]*
+		productionValue = productionValue - float64(catalysts.quantity)*method.consumption[index]*
 			((agent.priceBelief[catalysts.item].high+agent.priceBelief[catalysts.item].low)/2)
 	}
 
 	return productionValue
 }
 
-func getAllAverageProductionValues(agent *traderAgent) map[*productionMethod]float32 {
-	pvm := make(map[*productionMethod]float32)
+func getAllAverageProductionValues(agent *traderAgent) map[*productionMethod]float64 {
+	pvm := make(map[*productionMethod]float64)
 
 	for index, method := range agent.job.methods {
 		pvm[method] = getAverageProductionValue(agent, index)
@@ -287,6 +286,7 @@ func getAllAverageProductionValues(agent *traderAgent) map[*productionMethod]flo
 //price.  If they cannot execute the activity with the most expected value, they
 //execute the next highest value activity.  Idle agents are fined the idle penalty
 //of their productionSet.
+//agent - pointer to the traderAgent data set
 func performProduction(agent *traderAgent) {
 	//This is a sorting of methods by market value.
 	//BUG: This is incorrect.  However, I will test with an incorrect assumption
@@ -329,7 +329,7 @@ func performProduction(agent *traderAgent) {
 			//Test seperately for each catalyst
 			for i := 0; i < catalyst.quantity; i++ {
 				//Remove these on probablility given in consumption
-				if agent.job.methods[executedIndex].consumption[catalystIndex] > rand.Float32() {
+				if agent.job.methods[executedIndex].consumption[catalystIndex] > rand.Float64() {
 					//OK, you were unlucky!
 					agent.inventory[catalyst.item] = agent.inventory[catalyst.item] - 1
 				}
@@ -457,19 +457,120 @@ func generateBids(agent *traderAgent) []bids {
 	return bidSlice
 }
 
-//TODO: OK, this is the beginning of the next part to work on.  I need to finish
-//agentUpdate, as well as create the auction house. I then need to make them all
-//play nice with each other over channels (as shown)
-
+//agentUpdate updates the agent's inventory, price belief and cash on hand post
+//market results
+//agent - pointer to the traderAgent dataset
+//askSlice - pointer to the post market ask slice (carrying sold data)
+//bidSlice - pointer to the post market bid slice (carrying buy data)
 func agentUpdate(agent *traderAgent, askSlice *[]asks, bidSlice *[]bids) {
 	//Go through all the asks and tally up the sales/remove items from inventory.
 	//If not accepted, lower sales price internal estimate
-	for _, askSet := range askSlice {
-		if askSet.offeredAsk.accepted {
+	for _, askSet := range *askSlice {
+		agentHigh := agent.priceBelief[askSet.offeredAsk.item].high
+		agentLow := agent.priceBelief[askSet.offeredAsk.item].low
+		agentAvg := (agentHigh + agentLow) / 2
+		itemAvg := askSet.offeredAsk.item.averagePrice
+		if askSet.numberAccepted > 0 {
 			//AskSet was accepted!  Take out that much inventory and add cash.
-			traderAgent.funds = traderAgent.funds + (askSet.offeredAsk.quantity * askSet.offeredAsk.numberAccepted * askSet.offeredAsk.sellFor)
-			traderAgent.inventory
+			agent.funds = agent.funds + (float64(askSet.offeredAsk.quantity) * float64(askSet.numberAccepted) * askSet.offeredAsk.sellFor)
+			agent.inventory[askSet.offeredAsk.item] = agent.inventory[askSet.offeredAsk.item] - (askSet.offeredAsk.quantity * askSet.numberAccepted)
+			//Consider raising our prices - a lot if we're under the average, a little if we're over.
+			if agentAvg <= itemAvg {
+				//Agent Average under Average - Raise a lot!
+				if agentHigh <= itemAvg {
+					agentHigh = itemAvg + itemAvg/2
+				} else {
+					//Half again more.
+					agentHigh = agentHigh + math.Abs(agentHigh-itemAvg)/2
+				}
+				//Half the distance more.
+				agentLow = agentLow + math.Abs(agentLow-itemAvg)/2
+				//Bring it back down if too big.
+				for agentLow >= agentHigh {
+					agentLow = agentLow - math.Abs(agentLow-itemAvg)/2
+				}
+			} else {
+				//Overaverage!  Raise just a bit.
+				agentHigh = agentHigh + math.Abs(agentHigh-itemAvg)/5
+				agentLow = agentLow + math.Abs(agentLow-itemAvg)/5
+			}
+
+		} else {
+			//None were accepted!  This means our price was too high. =(
+			//Consider, are we larger than the average?  Lower it down towards the average by a lot.
+			//Are we lower than the average?  Lower it down a little bit.
+			if agentAvg >= itemAvg {
+				//Agent Average over Average - Lower a lot!
+				agentHigh = agentHigh - math.Abs(agentHigh-itemAvg)/2
+				agentLow = agentLow - math.Abs(agentLow-itemAvg)/2
+				for agentLow >= agentHigh {
+					agentLow = agentLow - math.Abs(agentLow-itemAvg)/2
+				}
+			} else {
+				//Under Average
+				agentHigh = agentHigh - math.Abs(agentHigh-itemAvg)/5
+				agentLow = agentLow - math.Abs(agentLow-itemAvg)/5
+			}
 		}
+		var agentPriceBelief = agent.priceBelief[askSet.offeredAsk.item]
+		agentPriceBelief.high = agentHigh
+		agentPriceBelief.low = agentLow
+		agent.priceBelief[askSet.offeredAsk.item] = agentPriceBelief
+	}
+
+	//Go through all the bids.
+	//Clear buys, remove money, add inventory, alter prices
+	for _, bidSet := range *bidSlice {
+		agentHigh := agent.priceBelief[bidSet.offeredBid.item].high
+		agentLow := agent.priceBelief[bidSet.offeredBid.item].low
+		agentAvg := (agentHigh + agentLow) / 2
+		itemAvg := bidSet.offeredBid.item.averagePrice
+		if bidSet.numberAccepted > 0 {
+			//bidSet was accepted!  Give inventory and remove cash
+			agent.funds = agent.funds - (float64(bidSet.offeredBid.quantity) * float64(bidSet.numberAccepted) * bidSet.offeredBid.buyFor)
+			agent.inventory[bidSet.offeredBid.item] = agent.inventory[bidSet.offeredBid.item] + (bidSet.offeredBid.quantity * bidSet.numberAccepted)
+			//Consider lowering our prices - a lot if we're over the average, a little if we're under.
+			if agentAvg >= itemAvg {
+				//Agent Average over Average - Lower a lot!
+				agentHigh = agentHigh - math.Abs(agentHigh-itemAvg)/2
+				agentLow = agentLow - math.Abs(agentLow-itemAvg)/2
+				for agentLow >= agentHigh {
+					agentLow = agentLow - math.Abs(agentLow-itemAvg)/2
+				}
+			} else {
+				//Under Average
+				agentHigh = agentHigh - math.Abs(agentHigh-itemAvg)/5
+				agentLow = agentLow - math.Abs(agentLow-itemAvg)/5
+			}
+
+		} else {
+			//None were accepted!  This means our price was too low. =(
+			//Consider, are we larger than the average?  Raise it down towards the average by a little.
+			//Are we lower than the average?  Raise it a lot
+			if agentAvg <= itemAvg {
+				//Agent Average under Average - Raise a lot!
+				if agentHigh <= itemAvg {
+					agentHigh = itemAvg + itemAvg/2
+				} else {
+					//Half again more.
+					agentHigh = agentHigh + math.Abs(agentHigh-itemAvg)/2
+				}
+				//Half the distance more.
+				agentLow = agentLow + math.Abs(agentLow-itemAvg)/2
+				//Bring it back down if too big.
+				for agentLow >= agentHigh {
+					agentLow = agentLow - math.Abs(agentLow-itemAvg)/2
+				}
+			} else {
+				//Overaverage!  Raise just a bit.
+				agentHigh = agentHigh + math.Abs(agentHigh-itemAvg)/5
+				agentLow = agentLow + math.Abs(agentLow-itemAvg)/5
+			}
+		}
+		var agentPriceBelief = agent.priceBelief[bidSet.offeredBid.item]
+		agentPriceBelief.high = agentHigh
+		agentPriceBelief.low = agentLow
+		agent.priceBelief[bidSet.offeredBid.item] = agentPriceBelief
 	}
 }
 
