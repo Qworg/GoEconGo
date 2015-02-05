@@ -95,31 +95,6 @@ type bid struct {
 	buyFor   float64
 }
 
-//func agentTrader(startCash float64, job *productionSet, agentStatusOut chan<- *agentStatus,
-//	agentAsk chan<- *[]ask, agentBid chan<- *[]bid) {
-
-//	funds := startCash
-//	inventory = make(map[*commodity]int)
-//	priceBelief := make(map[*commodity]priceRange)
-//	asks := make([]ask)
-//	bids := make([]bid)
-//	//Loop forever, or until we die (AKA run out of money)
-//	for {
-//		//First, try and perform production
-//		performProduction(job, *inventory)
-
-//		//TODO: Think about this more - we need a clean way of sending in a whole
-//		//set of bids and asks, then receiving whether or not they were successful.
-
-//		//Then, generate offers
-//		asks = generateAsks(job, *inventory)
-//		bids = generateBids(job, *inventory)
-//		//Send the offers in
-//		agentAsks <- asks
-//		agentBids <- bids
-//	}
-//}
-
 type asks struct {
 	offeredAsk     ask
 	numberOffered  int
@@ -574,9 +549,184 @@ func agentUpdate(agent *traderAgent, askSlice *[]asks, bidSlice *[]bids) {
 	}
 }
 
+//Generates an initial random price belief for an agent.  It is set to high >
+//averagePrice and low > 0
+//commoditySlice - a slice of commodity pointers
+//Returns a map of commodity pointers to price range
+func randomPriceBelief(commodityList map[string]*commodity) map[*commodity]priceRange {
+	prMap := make(map[*commodity]priceRange)
+	for _, aCommodity := range commodityList {
+		var pr priceRange
+		pr.high = aCommodity.averagePrice + (rand.Float64() * aCommodity.averagePrice)
+		pr.low = aCommodity.averagePrice - (rand.Float64() * aCommodity.averagePrice)
+		prMap[aCommodity] = pr
+	}
+	return prMap
+}
+
 func main() {
-	fmt.Println("Hello World!")
-	fmt.Println("Set up a ticker!")
+	fmt.Println("Economic Simulation")
+	fmt.Println("Set up our commodities")
+	var wood commodity
+	wood.name = "Wood"
+	wood.averagePrice = 3
+	var tools commodity
+	tools.name = "Tools"
+	tools.averagePrice = 12
+	var food commodity
+	food.name = "Food"
+	food.averagePrice = 3
+	var ore commodity
+	ore.name = "Ore"
+	ore.averagePrice = 3
+	var metal commodity
+	metal.name = "Metal"
+	metal.averagePrice = 6
+
+	allCommodities := make(map[string]*commodity)
+	allCommodities["Wood"] = &wood
+	allCommodities["Tools"] = &tools
+	allCommodities["Food"] = &food
+	allCommodities["Ore"] = &ore
+	allCommodities["Metal"] = &metal
+
+	//Commodity Sets
+	//Food
+	var singleFood commoditySet
+	singleFood.item = &food
+	singleFood.quantity = 1
+	var twoFood commoditySet
+	twoFood.item = &food
+	twoFood.quantity = 2
+	var fourFood commoditySet
+	fourFood.item = &food
+	fourFood.quantity = 4
+	//Wood
+	var singleWood commoditySet
+	singleWood.item = &wood
+	singleWood.quantity = 1
+	var twoWood commoditySet
+	twoWood.item = &wood
+	twoWood.quantity = 2
+	var fourWood commoditySet
+	fourWood.item = &wood
+	fourWood.quantity = 4
+	//Ore
+	var twoOre commoditySet
+	twoOre.item = &ore
+	twoOre.quantity = 2
+	var fourOre commoditySet
+	fourOre.item = &ore
+	fourOre.quantity = 4
+	//Metal
+	var twoMetal commoditySet
+	twoMetal.item = &metal
+	twoMetal.quantity = 2
+	var fourMetal commoditySet
+	fourMetal.item = &metal
+	fourMetal.quantity = 4
+	//Tools
+	var singleTools commoditySet
+	singleTools.item = &tools
+	singleTools.quantity = 1
+	var twoTools commoditySet
+	twoTools.item = &tools
+	twoTools.quantity = 2
+	var fourTools commoditySet
+	fourTools.item = &tools
+	fourTools.quantity = 4
+
+	fmt.Println("Set up our production rules")
+	//Farmer
+	var farmerProd productionMethod
+	farmerProd.inputs = append(farmerProd.inputs, singleWood)
+	farmerProd.outputs = append(farmerProd.outputs, twoFood)
+	var farmerToolsProd productionMethod
+	farmerToolsProd.inputs = farmerProd.inputs
+	farmerToolsProd.outputs = append(farmerToolsProd.outputs, fourFood)
+	farmerToolsProd.catalysts = append(farmerToolsProd.catalysts, singleTools)
+	farmerToolsProd.consumption = append(farmerToolsProd.consumption, 0.1)
+	var farmerProdSet productionSet
+	farmerProdSet.methods = make([]*productionMethod, 2)
+	farmerProdSet.methods[0] = &farmerProd
+	farmerProdSet.methods[1] = &farmerToolsProd
+	farmerProdSet.penalty = 2
+	//Miner
+	var minerProd productionMethod
+	minerProd.inputs = append(minerProd.inputs, singleFood)
+	minerProd.outputs = append(minerProd.outputs, twoOre)
+	var minerToolsProd productionMethod
+	minerToolsProd.inputs = minerProd.inputs
+	minerToolsProd.outputs = append(minerToolsProd.outputs, fourOre)
+	minerToolsProd.catalysts = append(minerToolsProd.catalysts, singleTools)
+	minerToolsProd.consumption = append(minerToolsProd.consumption, 0.1)
+	var minerProdSet productionSet
+	minerProdSet.methods = make([]*productionMethod, 2)
+	minerProdSet.methods[0] = &minerProd
+	minerProdSet.methods[1] = &minerToolsProd
+	minerProdSet.penalty = 2
+	//Refiner
+	var refinerProd productionMethod
+	refinerProd.inputs = make([]commoditySet, 2)
+	refinerProd.inputs[0] = singleFood
+	refinerProd.inputs[1] = twoOre
+	refinerProd.outputs = append(refinerProd.outputs, twoMetal)
+	var refinerToolsProd productionMethod
+	refinerToolsProd.inputs = make([]commoditySet, 2)
+	refinerToolsProd.inputs[0] = singleFood
+	refinerToolsProd.inputs[1] = fourOre
+	refinerToolsProd.outputs = append(refinerToolsProd.outputs, fourMetal)
+	refinerToolsProd.catalysts = append(refinerToolsProd.catalysts, singleTools)
+	refinerToolsProd.consumption = append(refinerToolsProd.consumption, 0.1)
+	var refinerProdSet productionSet
+	refinerProdSet.methods = make([]*productionMethod, 2)
+	refinerProdSet.methods[0] = &refinerProd
+	refinerProdSet.methods[1] = &refinerToolsProd
+	refinerProdSet.penalty = 2
+	//Woodcutter
+	var woodcutterProd productionMethod
+	woodcutterProd.inputs = append(woodcutterProd.inputs, singleFood)
+	woodcutterProd.outputs = append(woodcutterProd.outputs, singleWood)
+	var woodcutterToolsProd productionMethod
+	woodcutterToolsProd.inputs = woodcutterProd.inputs
+	woodcutterToolsProd.outputs = append(woodcutterToolsProd.outputs, twoWood)
+	woodcutterToolsProd.catalysts = append(woodcutterToolsProd.catalysts, singleTools)
+	woodcutterToolsProd.consumption = append(woodcutterToolsProd.consumption, 0.1)
+	var woodcutterProdSet productionSet
+	woodcutterProdSet.methods = make([]*productionMethod, 2)
+	woodcutterProdSet.methods[0] = &woodcutterProd
+	woodcutterProdSet.methods[1] = &woodcutterToolsProd
+	woodcutterProdSet.penalty = 2
+	//Blacksmith
+	var blacksmithProd productionMethod
+	blacksmithProd.inputs = make([]commoditySet, 2)
+	blacksmithProd.inputs[0] = singleFood
+	blacksmithProd.inputs[1] = twoMetal
+	blacksmithProd.outputs = append(blacksmithProd.outputs, twoTools)
+	var blacksmithDoubleProd productionMethod
+	blacksmithDoubleProd.inputs = make([]commoditySet, 2)
+	blacksmithDoubleProd.inputs[0] = singleFood
+	blacksmithDoubleProd.inputs[1] = fourMetal
+	blacksmithDoubleProd.outputs = append(blacksmithDoubleProd.outputs, fourTools)
+	var blacksmithProdSet productionSet
+	blacksmithProdSet.methods = make([]*productionMethod, 2)
+	blacksmithProdSet.methods[0] = &blacksmithProd
+	blacksmithProdSet.methods[1] = &blacksmithDoubleProd
+	blacksmithProdSet.penalty = 2
+
+	fmt.Println("Set up our traders!")
+	////makeFarmer Example
+	//farmer := makeFarmer(allCommodities, &farmerProdSet)
+	////makeMiner Example
+	//miner := makeMiner(allCommodities, &minerProdSet)
+	////makeRefiner Example
+	//refiner := makeRefiner(allCommodities, &refinerProdSet)
+	////makeWoodcutter Example
+	//woodcutter := makeWoodcutter(allCommodities, &woodcutterProdSet)
+	////makeBlacksmith Example
+	//blacksmith := makeBlacksmith(allCommodities, &blacksmithProdSet)
+
+	fmt.Println("Set up a market!")
 
 	ticker := time.NewTicker(time.Millisecond * 100)
 
@@ -588,6 +738,67 @@ func main() {
 
 	//Block forever
 	select {}
+}
+
+func makeFarmer(commodityList map[string]*commodity, prodSet *productionSet) traderAgent {
+	var farmerOut traderAgent
+	farmerOut.funds = 50 + (rand.Float64() * 50)
+	farmerOut.inventory = make(map[*commodity]int)
+	farmerOut.inventory[commodityList["Tools"]] = rand.Intn(2)
+	farmerOut.inventory[commodityList["Wood"]] = rand.Intn(4) + 2
+	farmerOut.job = prodSet
+	farmerOut.priceBelief = randomPriceBelief(commodityList)
+	farmerOut.riskAversion = rand.Intn(4) + 1
+	return farmerOut
+}
+
+func makeMiner(commodityList map[string]*commodity, prodSet *productionSet) traderAgent {
+	var minerOut traderAgent
+	minerOut.funds = 50 + (rand.Float64() * 50)
+	minerOut.inventory = make(map[*commodity]int)
+	minerOut.inventory[commodityList["Tools"]] = rand.Intn(2)
+	minerOut.inventory[commodityList["Food"]] = rand.Intn(4) + 2
+	minerOut.job = prodSet
+	minerOut.priceBelief = randomPriceBelief(commodityList)
+	minerOut.riskAversion = rand.Intn(4) + 1
+	return minerOut
+}
+
+func makeRefiner(commodityList map[string]*commodity, prodSet *productionSet) traderAgent {
+	var refinerOut traderAgent
+	refinerOut.funds = 50 + (rand.Float64() * 50)
+	refinerOut.inventory = make(map[*commodity]int)
+	refinerOut.inventory[commodityList["Ore"]] = 2 + rand.Intn(3)
+	refinerOut.inventory[commodityList["Food"]] = rand.Intn(4) + 2
+	refinerOut.inventory[commodityList["Tools"]] = rand.Intn(2)
+	refinerOut.job = prodSet
+	refinerOut.priceBelief = randomPriceBelief(commodityList)
+	refinerOut.riskAversion = rand.Intn(4) + 1
+	return refinerOut
+}
+
+func makeWoodcutter(commodityList map[string]*commodity, prodSet *productionSet) traderAgent {
+	var woodcutterOut traderAgent
+	woodcutterOut.funds = 50 + (rand.Float64() * 50)
+	woodcutterOut.inventory = make(map[*commodity]int)
+	woodcutterOut.inventory[commodityList["Tools"]] = rand.Intn(2)
+	woodcutterOut.inventory[commodityList["Food"]] = rand.Intn(4) + 2
+	woodcutterOut.job = prodSet
+	woodcutterOut.priceBelief = randomPriceBelief(commodityList)
+	woodcutterOut.riskAversion = rand.Intn(4) + 1
+	return woodcutterOut
+}
+
+func makeBlacksmith(commodityList map[string]*commodity, prodSet *productionSet) traderAgent {
+	var blacksmithOut traderAgent
+	blacksmithOut.funds = 50 + (rand.Float64() * 50)
+	blacksmithOut.inventory = make(map[*commodity]int)
+	blacksmithOut.inventory[commodityList["Metal"]] = 2 + rand.Intn(3)
+	blacksmithOut.inventory[commodityList["Food"]] = rand.Intn(4) + 2
+	blacksmithOut.job = prodSet
+	blacksmithOut.priceBelief = randomPriceBelief(commodityList)
+	blacksmithOut.riskAversion = rand.Intn(4) + 1
+	return blacksmithOut
 }
 
 //Set up our agent system/world state in here.
