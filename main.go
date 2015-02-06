@@ -66,6 +66,8 @@ type productionSet struct {
 //riskAversion - the level of look ahead in value during bidding in case of failed
 //bids.  Lower is more risky (since you could blow a bid)
 type traderAgent struct {
+	role         string
+	id           uint32
 	job          *productionSet
 	inventory    map[*commodity]int
 	priceBelief  map[*commodity]priceRange
@@ -145,11 +147,14 @@ func cQMapConcat(mA map[*commodity]int, mB map[*commodity]int) map[*commodity]in
 	mOut := mA
 
 	for k, v := range mB {
-		mOut[k] = mOut[k] + v
+		_, ok := mOut[k]
+		if ok {
+			mOut[k] = mOut[k] + v
+		} else {
+			mOut[k] = v
+		}
 	}
-
 	return mOut
-
 }
 
 //agentRun is the execution part of the traderAgent struct.
@@ -158,33 +163,39 @@ func cQMapConcat(mA map[*commodity]int, mB map[*commodity]int) map[*commodity]in
 //agent - a traderAgent struct
 //agentAsks - a channel for asks
 //agentBids - a channel for bids
-//agentAlive - a channel for saying whether or not we're alive
-func agentRun(agent traderAgent, agentAsks chan *[]asks, agentBids chan *[]bids, agentAlive chan bool) {
+//deadAgent - a channel for returning a dead traderAgent for examination and ressurection
+func agentRun(agent traderAgent) (chan *[]asks, chan *[]bids, chan traderAgent) {
 	var askSlice []asks
 	var bidSlice []bids
+	agentAsks := make(chan *[]asks)
+	agentBids := make(chan *[]bids)
+	deadAgent := make(chan traderAgent)
 	alive := true
-	//Loop forever, until we quit or die (AKA run out of money)
-	for alive {
-		//First, try and perform production
-		performProduction(&agent)
-		//Then, generate offers
-		askSlice = generateAsks(&agent)
-		bidSlice = generateBids(&agent)
-		//Send the offers in
-		agentAsks <- &askSlice
-		agentBids <- &bidSlice
-		//Receive responses
-		askSlice = *<-agentAsks
-		bidSlice = *<-agentBids
-		//Update cash on hand, inventory, and belief
-		agentUpdate(&agent, &askSlice, &bidSlice)
-		//If cash is gone, break the loop
-		if agent.funds <= 0 {
-			alive = false
+	go func() {
+		//Loop forever, until we quit or die (AKA run out of money)
+		for alive {
+			//First, try and perform production
+			performProduction(&agent)
+			//Then, generate offers
+			askSlice = generateAsks(&agent)
+			bidSlice = generateBids(&agent)
+			//Send the offers in
+			agentAsks <- &askSlice
+			agentBids <- &bidSlice
+			//Receive responses
+			askSlice = *<-agentAsks
+			bidSlice = *<-agentBids
+			//Update cash on hand, inventory, and belief
+			agentUpdate(&agent, &askSlice, &bidSlice)
+			//If cash is gone, break the loop
+			if agent.funds <= 0 {
+				alive = false
+			}
 		}
-	}
-	//Inform the world that we are dead (out of money) and return
-	agentAlive <- alive
+		//Inform the world that we are dead (out of money) and return
+		deadAgent <- agent
+	}()
+	return agentAsks, agentBids, deadAgent
 }
 
 //This is the definition of the sort for market value sorting.
@@ -404,7 +415,10 @@ func generateBids(agent *traderAgent) []bids {
 	invReqs := make(map[*commodity]int)
 	for i := 0; i < agent.riskAversion; i++ {
 		for j := 0; j < cyclesToCover; j++ {
-			invReqs = cQMapConcat(gatherRequirements(spv[i]), invReqs)
+			for _, pvSingle := range spv {
+				invReqs = cQMapConcat(gatherRequirements(pvSingle), invReqs)
+			}
+
 		}
 	}
 
@@ -726,13 +740,58 @@ func main() {
 	////makeBlacksmith Example
 	//blacksmith := makeBlacksmith(allCommodities, &blacksmithProdSet)
 
+	//Set the cohort sizes
+	numFarmers := 5000
+	numMiners := 5000
+	numRefiners := 5000
+	numWoodcutters := 5000
+	numBlacksmiths := 5000
+	totalTraders := numFarmers + numMiners + numRefiners + numWoodcutters + numBlacksmiths
+	askChannels := make([]chan *[]asks, totalTraders)
+	bidChannels := make([]chan *[]bids, totalTraders)
+	deadChannels := make([]chan traderAgent, totalTraders)
+	tempAskChannel := make(chan *[]asks)
+	tempBidChannel := make(chan *[]bids)
+	tempDeadChannel := make(chan traderAgent)
+	for i := 0; i < numFarmers; i++ {
+		tempAskChannel, tempBidChannel, tempDeadChannel = agentRun(makeFarmer(allCommodities, &farmerProdSet))
+		askChannels = append(askChannels, tempAskChannel)
+		bidChannels = append(bidChannels, tempBidChannel)
+		deadChannels = append(deadChannels, tempDeadChannel)
+	}
+	for i := 0; i < numMiners; i++ {
+		tempAskChannel, tempBidChannel, tempDeadChannel = agentRun(makeMiner(allCommodities, &minerProdSet))
+		askChannels = append(askChannels, tempAskChannel)
+		bidChannels = append(bidChannels, tempBidChannel)
+		deadChannels = append(deadChannels, tempDeadChannel)
+	}
+	for i := 0; i < numRefiners; i++ {
+		tempAskChannel, tempBidChannel, tempDeadChannel = agentRun(makeRefiner(allCommodities, &refinerProdSet))
+		askChannels = append(askChannels, tempAskChannel)
+		bidChannels = append(bidChannels, tempBidChannel)
+		deadChannels = append(deadChannels, tempDeadChannel)
+	}
+	for i := 0; i < numWoodcutters; i++ {
+		tempAskChannel, tempBidChannel, tempDeadChannel = agentRun(makeWoodcutter(allCommodities, &woodcutterProdSet))
+		askChannels = append(askChannels, tempAskChannel)
+		bidChannels = append(bidChannels, tempBidChannel)
+		deadChannels = append(deadChannels, tempDeadChannel)
+	}
+	for i := 0; i < numBlacksmiths; i++ {
+		tempAskChannel, tempBidChannel, tempDeadChannel = agentRun(makeBlacksmith(allCommodities, &blacksmithProdSet))
+		askChannels = append(askChannels, tempAskChannel)
+		bidChannels = append(bidChannels, tempBidChannel)
+		deadChannels = append(deadChannels, tempDeadChannel)
+	}
+
 	fmt.Println("Set up a market!")
-
 	ticker := time.NewTicker(time.Millisecond * 100)
-
 	go func() {
 		for t := range ticker.C {
 			fmt.Println("tick at", t)
+			//RECEIVE ALL THE ASKS AND BIDS
+
+			//
 		}
 	}()
 
@@ -742,6 +801,7 @@ func main() {
 
 func makeFarmer(commodityList map[string]*commodity, prodSet *productionSet) traderAgent {
 	var farmerOut traderAgent
+	farmerOut.role = "Farmer"
 	farmerOut.funds = 50 + (rand.Float64() * 50)
 	farmerOut.inventory = make(map[*commodity]int)
 	farmerOut.inventory[commodityList["Tools"]] = rand.Intn(2)
@@ -754,6 +814,7 @@ func makeFarmer(commodityList map[string]*commodity, prodSet *productionSet) tra
 
 func makeMiner(commodityList map[string]*commodity, prodSet *productionSet) traderAgent {
 	var minerOut traderAgent
+	minerOut.role = "Miner"
 	minerOut.funds = 50 + (rand.Float64() * 50)
 	minerOut.inventory = make(map[*commodity]int)
 	minerOut.inventory[commodityList["Tools"]] = rand.Intn(2)
@@ -766,6 +827,7 @@ func makeMiner(commodityList map[string]*commodity, prodSet *productionSet) trad
 
 func makeRefiner(commodityList map[string]*commodity, prodSet *productionSet) traderAgent {
 	var refinerOut traderAgent
+	refinerOut.role = "Refiner"
 	refinerOut.funds = 50 + (rand.Float64() * 50)
 	refinerOut.inventory = make(map[*commodity]int)
 	refinerOut.inventory[commodityList["Ore"]] = 2 + rand.Intn(3)
@@ -779,6 +841,7 @@ func makeRefiner(commodityList map[string]*commodity, prodSet *productionSet) tr
 
 func makeWoodcutter(commodityList map[string]*commodity, prodSet *productionSet) traderAgent {
 	var woodcutterOut traderAgent
+	woodcutterOut.role = "Woodcutter"
 	woodcutterOut.funds = 50 + (rand.Float64() * 50)
 	woodcutterOut.inventory = make(map[*commodity]int)
 	woodcutterOut.inventory[commodityList["Tools"]] = rand.Intn(2)
@@ -791,6 +854,7 @@ func makeWoodcutter(commodityList map[string]*commodity, prodSet *productionSet)
 
 func makeBlacksmith(commodityList map[string]*commodity, prodSet *productionSet) traderAgent {
 	var blacksmithOut traderAgent
+	blacksmithOut.role = "Blacksmith"
 	blacksmithOut.funds = 50 + (rand.Float64() * 50)
 	blacksmithOut.inventory = make(map[*commodity]int)
 	blacksmithOut.inventory[commodityList["Metal"]] = 2 + rand.Intn(3)
