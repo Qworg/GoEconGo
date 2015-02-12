@@ -81,6 +81,7 @@ type traderAgent struct {
 //sellFor - a price to sell that commodity at
 //accepted - whether or not this ask was successful //a channel to feed back results to the agent
 type ask struct {
+	id       uint64
 	item     *commodity
 	quantity int
 	sellFor  float64
@@ -92,6 +93,7 @@ type ask struct {
 //buyFor - a price to buy that commodity for
 //accepted - whether or not this bid was successful //a channel to feed back results to the agent
 type bid struct {
+	id       uint64
 	item     *commodity
 	quantity int
 	buyFor   float64
@@ -164,11 +166,11 @@ func cQMapConcat(mA map[*commodity]int, mB map[*commodity]int) map[*commodity]in
 //agentAsks - a channel for asks
 //agentBids - a channel for bids
 //deadAgent - a channel for returning a dead traderAgent for examination and ressurection
-func agentRun(agent traderAgent) (chan *[]asks, chan *[]bids, chan traderAgent) {
+func agentRun(agent traderAgent) (chan []asks, chan []bids, chan traderAgent) {
 	var askSlice []asks
 	var bidSlice []bids
-	agentAsks := make(chan *[]asks)
-	agentBids := make(chan *[]bids)
+	agentAsks := make(chan []asks)
+	agentBids := make(chan []bids)
 	deadAgent := make(chan traderAgent)
 	alive := true
 	go func() {
@@ -180,11 +182,12 @@ func agentRun(agent traderAgent) (chan *[]asks, chan *[]bids, chan traderAgent) 
 			askSlice = generateAsks(&agent)
 			bidSlice = generateBids(&agent)
 			//Send the offers in
-			agentAsks <- &askSlice
-			agentBids <- &bidSlice
+			agentAsks <- askSlice
+			agentBids <- bidSlice
 			//Receive responses
-			askSlice = *<-agentAsks
-			bidSlice = *<-agentBids
+			askSlice = <-agentAsks
+			bidSlice = <-agentBids
+			//fmt.Println("Got my responses!")
 			//Update cash on hand, inventory, and belief
 			agentUpdate(&agent, &askSlice, &bidSlice)
 			//If cash is gone, break the loop
@@ -741,17 +744,17 @@ func main() {
 	//blacksmith := makeBlacksmith(allCommodities, &blacksmithProdSet)
 
 	//Set the cohort sizes
-	numFarmers := 5000
-	numMiners := 5000
-	numRefiners := 5000
-	numWoodcutters := 5000
-	numBlacksmiths := 5000
+	numFarmers := 500
+	numMiners := 500
+	numRefiners := 500
+	numWoodcutters := 500
+	numBlacksmiths := 500
 	totalTraders := numFarmers + numMiners + numRefiners + numWoodcutters + numBlacksmiths
-	askChannels := make([]chan *[]asks, totalTraders)
-	bidChannels := make([]chan *[]bids, totalTraders)
+	askChannels := make([]chan []asks, totalTraders)
+	bidChannels := make([]chan []bids, totalTraders)
 	deadChannels := make([]chan traderAgent, totalTraders)
-	tempAskChannel := make(chan *[]asks)
-	tempBidChannel := make(chan *[]bids)
+	tempAskChannel := make(chan []asks)
+	tempBidChannel := make(chan []bids)
 	tempDeadChannel := make(chan traderAgent)
 	for i := 0; i < numFarmers; i++ {
 		tempAskChannel, tempBidChannel, tempDeadChannel = agentRun(makeFarmer(allCommodities, &farmerProdSet))
@@ -785,19 +788,263 @@ func main() {
 	}
 
 	fmt.Println("Set up a market!")
-	ticker := time.NewTicker(time.Millisecond * 100)
+	//Make the ask and bid books
+	//Break them by type
+	asksTyped := make(map[*commodity][]*asks)
+	bidsTyped := make(map[*commodity][]*bids)
+	for _, com := range allCommodities {
+		var asksBlank []*asks
+		var bidsBlank []*bids
+		asksTyped[com] = asksBlank
+		bidsTyped[com] = bidsBlank
+	}
+	//totalTimeMillis := 300
+	ticker := time.NewTicker(time.Millisecond * 300)
 	go func() {
 		for t := range ticker.C {
 			fmt.Println("tick at", t)
 			//RECEIVE ALL THE ASKS AND BIDS
 
-			//
+			//Check all the ask channels
+			var tempAsksStorage []asks
+			for chindex, channel := range askChannels {
+				select {
+				case tempAsksStorage = <-channel:
+					//fmt.Println("Got an *[]asks on ", chindex)
+					for _, asksIn := range tempAsksStorage {
+						//Add them to the ask book
+						asksIn.offeredAsk.id = uint64(chindex)
+						asksTyped[asksIn.offeredAsk.item] = append(asksTyped[asksIn.offeredAsk.item], &asksIn)
+					}
+				default:
+					//fmt.Println("No Asks on %v", chindex)
+				}
+			}
+			var tempBidsStorage []bids
+			for chindex, channel := range bidChannels {
+				select {
+				case tempBidsStorage = <-channel:
+					//fmt.Println("Got a *[]bids on %v", chindex)
+					for _, bidsIn := range tempBidsStorage {
+						//Add them to the bids book
+						bidsIn.offeredBid.id = uint64(chindex)
+						bidsTyped[bidsIn.offeredBid.item] = append(bidsTyped[bidsIn.offeredBid.item], &bidsIn)
+					}
+				default:
+					//fmt.Println("No Bid on %v", chindex)
+				}
+			}
+
+			fmt.Println("Total Asks: ", len(asksTyped))
+			fmt.Println("Total Bids: ", len(bidsTyped))
+
+			//Sort the Asks and Bids within each type
+			for com, asksCom := range asksTyped {
+				fmt.Printf("Asks for %v: %v\n", com.name, len(asksCom))
+				sort.Sort(AsksLowToHigh(asksCom))
+			}
+			for com, bidsCom := range bidsTyped {
+				fmt.Printf("Bids for %v: %v\n", com.name, len(bidsCom))
+				sort.Sort(BidsHighToLow(bidsCom))
+			}
+
+			for com, asksCom := range asksTyped {
+				//Comparison: Lowest Ask to Highest Bid
+				bidsCom := bidsTyped[com]
+				//continue to match them, executing clearing trades as we go.
+				asksIndex := 0
+				bidsIndex := 0
+				totalTransactions := 0
+				var runningTotal float64
+				runningTotal = 0.0
+				for {
+					asksQuantityRemaining := asksCom[asksIndex].numberOffered - asksCom[asksIndex].numberAccepted
+					bidsQuantityRemaining := bidsCom[bidsIndex].numberOffered - bidsCom[bidsIndex].numberAccepted
+					//Make sure prices are still acceptable - are there bids greater than asks in existance?
+					if asksCom[asksIndex].offeredAsk.sellFor > bidsCom[bidsIndex].offeredBid.buyFor {
+						break
+					}
+					//We're in business then - keep rollin'.
+					if asksQuantityRemaining >= bidsQuantityRemaining {
+						asksCom[asksIndex].numberAccepted += bidsQuantityRemaining
+						bidsCom[bidsIndex].numberAccepted = bidsCom[bidsIndex].numberOffered
+						totalTransactions += bidsCom[bidsIndex].numberAccepted
+						if asksQuantityRemaining != bidsQuantityRemaining {
+							//Split to add a new ask with the remaining bit (since we need to communicate back our price)
+							tempAsksComPre := asksCom[:asksIndex+1]  //Get everything before including our current index
+							tempAsksComPost := asksCom[asksIndex+1:] //Get everything after our current index
+							newAsk := asksCom[asksIndex].offeredAsk
+							newAsks := asksCom[asksIndex]
+							newAsks.numberAccepted = 0
+							newAsks.numberOffered = asksCom[asksIndex].numberOffered - asksCom[asksIndex].numberAccepted
+							newAsks.offeredAsk = newAsk
+							asksCom = append(tempAsksComPre, newAsks)
+							asksCom = append(asksCom, tempAsksComPost...)
+						}
+						//OK! New one added, let's clear the rest of it.
+						asksCom[asksIndex].numberOffered = asksCom[asksIndex].numberAccepted
+						asksCom[asksIndex].offeredAsk.sellFor = (asksCom[asksIndex].offeredAsk.sellFor + bidsCom[bidsIndex].offeredBid.buyFor) / 2.0
+						bidsCom[bidsIndex].offeredBid.buyFor = asksCom[asksIndex].offeredAsk.sellFor
+						runningTotal += bidsCom[bidsIndex].offeredBid.buyFor * float64(bidsCom[bidsIndex].numberAccepted)
+					} else {
+						//OK, more bids than asks instead.
+						bidsCom[bidsIndex].numberAccepted += asksQuantityRemaining
+						asksCom[asksIndex].numberAccepted = asksCom[asksIndex].numberOffered
+						totalTransactions += asksCom[asksIndex].numberAccepted
+						//Split to add a new bid with the remaining bit (since we need to communicate back our price)
+						tempBidsComPre := bidsCom[:bidsIndex+1]  //Get everything before including our current index
+						tempBidsComPost := bidsCom[bidsIndex+1:] //Get everything after our current index
+						newBid := bidsCom[bidsIndex].offeredBid
+						newBids := bidsCom[bidsIndex]
+						newBids.numberAccepted = 0
+						newBids.numberOffered = bidsCom[bidsIndex].numberOffered - bidsCom[bidsIndex].numberAccepted
+						newBids.offeredBid = newBid
+						bidsCom = append(tempBidsComPre, newBids)
+						bidsCom = append(bidsCom, tempBidsComPost...)
+						//OK! new one added, let's clear the rest of it.
+						bidsCom[bidsIndex].numberOffered = bidsCom[bidsIndex].numberAccepted
+						asksCom[asksIndex].offeredAsk.sellFor = (asksCom[asksIndex].offeredAsk.sellFor + bidsCom[bidsIndex].offeredBid.buyFor) / 2.0
+						bidsCom[bidsIndex].offeredBid.buyFor = asksCom[asksIndex].offeredAsk.sellFor
+						runningTotal += asksCom[asksIndex].offeredAsk.sellFor * float64(asksCom[asksIndex].numberAccepted)
+					}
+					//increase the indexes
+					bidsIndex++
+					asksIndex++
+					//fmt.Printf("AskIndex: %v , BidIndex: %v\n", asksIndex, bidsIndex)
+
+					//while both bids and asks have remaining individuals
+					if bidsIndex >= len(bidsCom) || asksIndex >= len(asksCom) {
+						break
+					}
+				}
+				if totalTransactions != 0 {
+					com.averagePrice = runningTotal / float64(totalTransactions)
+				} else {
+					fmt.Println("No transactions!")
+				}
+			}
+
+			//OK! Market Cleared.  Communicate results
+			fmt.Println("Market Cleared!")
+			for index, askChannel := range askChannels {
+				var asksOut []asks
+				//Search the results for matching results to send on the channel
+				for _, asksCom := range asksTyped {
+					for _, asksTest := range asksCom {
+						if asksTest.offeredAsk.id == uint64(index) {
+							asksOut = append(asksOut, *asksTest)
+						}
+					}
+				}
+				select {
+				case askChannel <- asksOut:
+					//fmt.Println("Sent a message!")
+				default:
+				}
+			}
+			fmt.Println("Done sending over askChannels")
+
+			for index, bidChannel := range bidChannels {
+				var bidsOut []bids
+				//Search the results for matching results to send on the channel
+				for _, bidsCom := range bidsTyped {
+					for _, bidsTest := range bidsCom {
+						if bidsTest.offeredBid.id == uint64(index) {
+							bidsOut = append(bidsOut, *bidsTest)
+						}
+					}
+				}
+				select {
+				case bidChannel <- bidsOut:
+					//fmt.Println("Sent a Bid Message")
+				default:
+				}
+			}
+
+			//Check for Deads and Regen
+			for chindex, channel := range deadChannels {
+				var deadAgent traderAgent
+				select {
+				case deadAgent = <-channel:
+					fmt.Println("Got a dead on ", chindex)
+					switch deadAgent.role {
+					case "Farmer":
+						numFarmers--
+					case "Miner":
+						numMiners--
+					case "Refiner":
+						numRefiners--
+					case "Woodcutter":
+						numWoodcutters--
+					case "Blacksmith":
+						numBlacksmiths--
+					}
+
+					//Which Commodity is the most expensive?
+					maxCom := allCommodities["Food"]
+					for _, com := range allCommodities {
+						if com.averagePrice > maxCom.averagePrice {
+							maxCom = com
+						}
+					}
+
+					//Make that one!
+					switch maxCom.name {
+					case "Food":
+						askChannels[chindex], bidChannels[chindex], deadChannels[chindex] = agentRun(makeFarmer(allCommodities, &farmerProdSet))
+						numFarmers++
+					case "Ore":
+						askChannels[chindex], bidChannels[chindex], deadChannels[chindex] = agentRun(makeMiner(allCommodities, &minerProdSet))
+						numMiners++
+					case "Metal":
+						askChannels[chindex], bidChannels[chindex], deadChannels[chindex] = agentRun(makeRefiner(allCommodities, &refinerProdSet))
+						numRefiners++
+					case "Wood":
+						askChannels[chindex], bidChannels[chindex], deadChannels[chindex] = agentRun(makeWoodcutter(allCommodities, &woodcutterProdSet))
+						numWoodcutters++
+					case "Tools":
+						askChannels[chindex], bidChannels[chindex], deadChannels[chindex] = agentRun(makeBlacksmith(allCommodities, &blacksmithProdSet))
+						numBlacksmiths++
+					}
+
+				default:
+					//fmt.Println("No Deads on %v", chindex)
+				}
+			}
+			//Output our live counts!
+			fmt.Println("\nAgent Count!")
+			fmt.Println("Farmers: ", numFarmers)
+			fmt.Println("Miners: ", numMiners)
+			fmt.Println("Refiners: ", numRefiners)
+			fmt.Println("Woodcutters: ", numWoodcutters)
+			fmt.Println("Blacksmiths: ", numBlacksmiths)
+
+			fmt.Println("\nPrices!")
+			fmt.Println("Food: ", allCommodities["Food"].averagePrice)
+			fmt.Println("Ore: ", allCommodities["Ore"].averagePrice)
+			fmt.Println("Metal: ", allCommodities["Metal"].averagePrice)
+			fmt.Println("Wood: ", allCommodities["Wood"].averagePrice)
+			fmt.Println("Tools: ", allCommodities["Tools"].averagePrice)
 		}
 	}()
 
 	//Block forever
 	select {}
 }
+
+//This is the definition of the sort asks lowest to highest
+type AsksLowToHigh []*asks
+
+func (a AsksLowToHigh) Len() int           { return len(a) }
+func (a AsksLowToHigh) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
+func (a AsksLowToHigh) Less(i, j int) bool { return a[i].offeredAsk.sellFor < a[j].offeredAsk.sellFor }
+
+//This is the definition of the sort bids from highest to lowest
+type BidsHighToLow []*bids
+
+func (a BidsHighToLow) Len() int           { return len(a) }
+func (a BidsHighToLow) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
+func (a BidsHighToLow) Less(i, j int) bool { return a[i].offeredBid.buyFor > a[j].offeredBid.buyFor } //THIS MAY NOT WORK
 
 func makeFarmer(commodityList map[string]*commodity, prodSet *productionSet) traderAgent {
 	var farmerOut traderAgent
