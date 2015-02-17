@@ -179,13 +179,18 @@ func agentRun(agent traderAgent) (chan []asks, chan []bids, chan traderAgent) {
 			//First, try and perform production
 			performProduction(&agent)
 			//Then, generate offers
+
 			askSlice = generateAsks(&agent)
 			bidSlice = generateBids(&agent)
+			//fmt.Println(askSlice)
 			//Send the offers in
 			agentAsks <- askSlice
 			agentBids <- bidSlice
 			//Receive responses
 			askSlice = <-agentAsks
+			//for len(askSlice) == 0 {
+			//	askSlice = <-agentAsks //get the last one?
+			//}
 			bidSlice = <-agentBids
 			//fmt.Println("Got my responses!")
 			//Update cash on hand, inventory, and belief
@@ -386,6 +391,7 @@ func generateAsks(agent *traderAgent) []asks {
 			var askBuild asks
 			askBuild.numberAccepted = 0
 			askBuild.numberOffered = num
+			askBuild.offeredAsk.quantity = 1
 			askBuild.offeredAsk.item = com
 			//So, given the average price on the exchange, what should we sell for?
 			//This instantiation sells for the average of my price belief and the
@@ -437,6 +443,7 @@ func generateBids(agent *traderAgent) []bids {
 	for com, num := range invReqs {
 		var bidBuild bids
 		bidBuild.numberOffered = num
+		bidBuild.offeredBid.quantity = 1
 		bidBuild.offeredBid.item = com
 		//So, given the average price on the exchange, what should we buy at?
 		//This instantiation buys at the average of my price belief and the
@@ -504,9 +511,16 @@ func agentUpdate(agent *traderAgent, askSlice *[]asks, bidSlice *[]bids) {
 				agentLow = agentLow - math.Abs(agentLow-itemAvg)/5
 			}
 		}
+		if agentHigh < askSet.offeredAsk.item.averagePrice {
+			agentHigh = askSet.offeredAsk.item.averagePrice
+		}
+		if agentLow < 0 {
+			agentLow = 0.5 //Totally arbitrary
+		}
 		var agentPriceBelief = agent.priceBelief[askSet.offeredAsk.item]
 		agentPriceBelief.high = agentHigh
 		agentPriceBelief.low = agentLow
+		//fmt.Printf("Price on %v: Low: %v, High: %v, Current Average: %v\n", askSet.offeredAsk.item.name, agentLow, agentHigh, askSet.offeredAsk.item.averagePrice)
 		agent.priceBelief[askSet.offeredAsk.item] = agentPriceBelief
 	}
 
@@ -744,11 +758,11 @@ func main() {
 	//blacksmith := makeBlacksmith(allCommodities, &blacksmithProdSet)
 
 	//Set the cohort sizes
-	numFarmers := 500
-	numMiners := 500
-	numRefiners := 500
-	numWoodcutters := 500
-	numBlacksmiths := 500
+	numFarmers := 5
+	numMiners := 5
+	numRefiners := 5
+	numWoodcutters := 5
+	numBlacksmiths := 5
 	totalTraders := numFarmers + numMiners + numRefiners + numWoodcutters + numBlacksmiths
 	askChannels := make([]chan []asks, totalTraders)
 	bidChannels := make([]chan []bids, totalTraders)
@@ -799,7 +813,7 @@ func main() {
 		bidsTyped[com] = bidsBlank
 	}
 	//totalTimeMillis := 300
-	ticker := time.NewTicker(time.Millisecond * 300)
+	ticker := time.NewTicker(time.Millisecond * 500)
 	go func() {
 		for t := range ticker.C {
 			fmt.Println("tick at", t)
@@ -835,8 +849,8 @@ func main() {
 				}
 			}
 
-			fmt.Println("Total Asks: ", len(asksTyped))
-			fmt.Println("Total Bids: ", len(bidsTyped))
+			fmt.Println("Total Asks Types: ", len(asksTyped))
+			fmt.Println("Total Bids Types: ", len(bidsTyped))
 
 			//Sort the Asks and Bids within each type
 			for com, asksCom := range asksTyped {
@@ -857,70 +871,72 @@ func main() {
 				totalTransactions := 0
 				var runningTotal float64
 				runningTotal = 0.0
-				for {
-					asksQuantityRemaining := asksCom[asksIndex].numberOffered - asksCom[asksIndex].numberAccepted
-					bidsQuantityRemaining := bidsCom[bidsIndex].numberOffered - bidsCom[bidsIndex].numberAccepted
-					//Make sure prices are still acceptable - are there bids greater than asks in existance?
-					if asksCom[asksIndex].offeredAsk.sellFor > bidsCom[bidsIndex].offeredBid.buyFor {
-						break
-					}
-					//We're in business then - keep rollin'.
-					if asksQuantityRemaining >= bidsQuantityRemaining {
-						asksCom[asksIndex].numberAccepted += bidsQuantityRemaining
-						bidsCom[bidsIndex].numberAccepted = bidsCom[bidsIndex].numberOffered
-						totalTransactions += bidsCom[bidsIndex].numberAccepted
-						if asksQuantityRemaining != bidsQuantityRemaining {
-							//Split to add a new ask with the remaining bit (since we need to communicate back our price)
-							tempAsksComPre := asksCom[:asksIndex+1]  //Get everything before including our current index
-							tempAsksComPost := asksCom[asksIndex+1:] //Get everything after our current index
-							newAsk := asksCom[asksIndex].offeredAsk
-							newAsks := asksCom[asksIndex]
-							newAsks.numberAccepted = 0
-							newAsks.numberOffered = asksCom[asksIndex].numberOffered - asksCom[asksIndex].numberAccepted
-							newAsks.offeredAsk = newAsk
-							asksCom = append(tempAsksComPre, newAsks)
-							asksCom = append(asksCom, tempAsksComPost...)
+				if len(asksCom) > 0 && len(bidsCom) > 0 {
+					for {
+						asksQuantityRemaining := asksCom[asksIndex].numberOffered - asksCom[asksIndex].numberAccepted
+						bidsQuantityRemaining := bidsCom[bidsIndex].numberOffered - bidsCom[bidsIndex].numberAccepted
+						//Make sure prices are still acceptable - are there bids greater than asks in existance?
+						if asksCom[asksIndex].offeredAsk.sellFor > bidsCom[bidsIndex].offeredBid.buyFor {
+							break
 						}
-						//OK! New one added, let's clear the rest of it.
-						asksCom[asksIndex].numberOffered = asksCom[asksIndex].numberAccepted
-						asksCom[asksIndex].offeredAsk.sellFor = (asksCom[asksIndex].offeredAsk.sellFor + bidsCom[bidsIndex].offeredBid.buyFor) / 2.0
-						bidsCom[bidsIndex].offeredBid.buyFor = asksCom[asksIndex].offeredAsk.sellFor
-						runningTotal += bidsCom[bidsIndex].offeredBid.buyFor * float64(bidsCom[bidsIndex].numberAccepted)
-					} else {
-						//OK, more bids than asks instead.
-						bidsCom[bidsIndex].numberAccepted += asksQuantityRemaining
-						asksCom[asksIndex].numberAccepted = asksCom[asksIndex].numberOffered
-						totalTransactions += asksCom[asksIndex].numberAccepted
-						//Split to add a new bid with the remaining bit (since we need to communicate back our price)
-						tempBidsComPre := bidsCom[:bidsIndex+1]  //Get everything before including our current index
-						tempBidsComPost := bidsCom[bidsIndex+1:] //Get everything after our current index
-						newBid := bidsCom[bidsIndex].offeredBid
-						newBids := bidsCom[bidsIndex]
-						newBids.numberAccepted = 0
-						newBids.numberOffered = bidsCom[bidsIndex].numberOffered - bidsCom[bidsIndex].numberAccepted
-						newBids.offeredBid = newBid
-						bidsCom = append(tempBidsComPre, newBids)
-						bidsCom = append(bidsCom, tempBidsComPost...)
-						//OK! new one added, let's clear the rest of it.
-						bidsCom[bidsIndex].numberOffered = bidsCom[bidsIndex].numberAccepted
-						asksCom[asksIndex].offeredAsk.sellFor = (asksCom[asksIndex].offeredAsk.sellFor + bidsCom[bidsIndex].offeredBid.buyFor) / 2.0
-						bidsCom[bidsIndex].offeredBid.buyFor = asksCom[asksIndex].offeredAsk.sellFor
-						runningTotal += asksCom[asksIndex].offeredAsk.sellFor * float64(asksCom[asksIndex].numberAccepted)
-					}
-					//increase the indexes
-					bidsIndex++
-					asksIndex++
-					//fmt.Printf("AskIndex: %v , BidIndex: %v\n", asksIndex, bidsIndex)
+						//We're in business then - keep rollin'.
+						if asksQuantityRemaining >= bidsQuantityRemaining {
+							asksCom[asksIndex].numberAccepted += bidsQuantityRemaining
+							bidsCom[bidsIndex].numberAccepted = bidsCom[bidsIndex].numberOffered
+							totalTransactions += bidsCom[bidsIndex].numberAccepted
+							if asksQuantityRemaining != bidsQuantityRemaining {
+								//Split to add a new ask with the remaining bit (since we need to communicate back our price)
+								tempAsksComPre := asksCom[:asksIndex+1]  //Get everything before including our current index
+								tempAsksComPost := asksCom[asksIndex+1:] //Get everything after our current index
+								newAsk := asksCom[asksIndex].offeredAsk
+								newAsks := asksCom[asksIndex]
+								newAsks.numberAccepted = 0
+								newAsks.numberOffered = asksCom[asksIndex].numberOffered - asksCom[asksIndex].numberAccepted
+								newAsks.offeredAsk = newAsk
+								asksCom = append(tempAsksComPre, newAsks)
+								asksCom = append(asksCom, tempAsksComPost...)
+							}
+							//OK! New one added, let's clear the rest of it.
+							asksCom[asksIndex].numberOffered = asksCom[asksIndex].numberAccepted
+							asksCom[asksIndex].offeredAsk.sellFor = (asksCom[asksIndex].offeredAsk.sellFor + bidsCom[bidsIndex].offeredBid.buyFor) / 2.0
+							bidsCom[bidsIndex].offeredBid.buyFor = asksCom[asksIndex].offeredAsk.sellFor
+							runningTotal += bidsCom[bidsIndex].offeredBid.buyFor * float64(bidsCom[bidsIndex].numberAccepted)
+						} else {
+							//OK, more bids than asks instead.
+							bidsCom[bidsIndex].numberAccepted += asksQuantityRemaining
+							asksCom[asksIndex].numberAccepted = asksCom[asksIndex].numberOffered
+							totalTransactions += asksCom[asksIndex].numberAccepted
+							//Split to add a new bid with the remaining bit (since we need to communicate back our price)
+							tempBidsComPre := bidsCom[:bidsIndex+1]  //Get everything before including our current index
+							tempBidsComPost := bidsCom[bidsIndex+1:] //Get everything after our current index
+							newBid := bidsCom[bidsIndex].offeredBid
+							newBids := bidsCom[bidsIndex]
+							newBids.numberAccepted = 0
+							newBids.numberOffered = bidsCom[bidsIndex].numberOffered - bidsCom[bidsIndex].numberAccepted
+							newBids.offeredBid = newBid
+							bidsCom = append(tempBidsComPre, newBids)
+							bidsCom = append(bidsCom, tempBidsComPost...)
+							//OK! new one added, let's clear the rest of it.
+							bidsCom[bidsIndex].numberOffered = bidsCom[bidsIndex].numberAccepted
+							asksCom[asksIndex].offeredAsk.sellFor = (asksCom[asksIndex].offeredAsk.sellFor + bidsCom[bidsIndex].offeredBid.buyFor) / 2.0
+							bidsCom[bidsIndex].offeredBid.buyFor = asksCom[asksIndex].offeredAsk.sellFor
+							runningTotal += asksCom[asksIndex].offeredAsk.sellFor * float64(asksCom[asksIndex].numberAccepted)
+						}
+						//increase the indexes
+						bidsIndex++
+						asksIndex++
+						//fmt.Printf("AskIndex: %v , BidIndex: %v\n", asksIndex, bidsIndex)
 
-					//while both bids and asks have remaining individuals
-					if bidsIndex >= len(bidsCom) || asksIndex >= len(asksCom) {
-						break
+						//while both bids and asks have remaining individuals
+						if bidsIndex >= len(bidsCom) || asksIndex >= len(asksCom) {
+							break
+						}
 					}
 				}
 				if totalTransactions != 0 {
 					com.averagePrice = runningTotal / float64(totalTransactions)
 				} else {
-					fmt.Println("No transactions!")
+					fmt.Printf("No transactions of %v!\n", com.name)
 				}
 			}
 
