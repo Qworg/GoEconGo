@@ -179,7 +179,8 @@ func agentRun(agent traderAgent) (chan []asks, chan []bids, chan traderAgent) {
 			//First, try and perform production
 			performProduction(&agent)
 			//Then, generate offers
-
+			askSlice = nil
+			bidSlice = nil
 			askSlice = generateAsks(&agent)
 			bidSlice = generateBids(&agent)
 			//fmt.Println(askSlice)
@@ -464,6 +465,8 @@ func generateBids(agent *traderAgent) []bids {
 func agentUpdate(agent *traderAgent, askSlice *[]asks, bidSlice *[]bids) {
 	//Go through all the asks and tally up the sales/remove items from inventory.
 	//If not accepted, lower sales price internal estimate
+	bigPercent := 0.5
+	littlePercent := 0.1
 	for _, askSet := range *askSlice {
 		agentHigh := agent.priceBelief[askSet.offeredAsk.item].high
 		agentLow := agent.priceBelief[askSet.offeredAsk.item].low
@@ -477,21 +480,21 @@ func agentUpdate(agent *traderAgent, askSlice *[]asks, bidSlice *[]bids) {
 			if agentAvg <= itemAvg {
 				//Agent Average under Average - Raise a lot!
 				if agentHigh <= itemAvg {
-					agentHigh = itemAvg + itemAvg/2
+					agentHigh = itemAvg + itemAvg*littlePercent
 				} else {
 					//Half again more.
-					agentHigh = agentHigh + math.Abs(agentHigh-itemAvg)/2
+					agentHigh = agentHigh + math.Abs(agentHigh-itemAvg)*bigPercent
 				}
 				//Half the distance more.
-				agentLow = agentLow + math.Abs(agentLow-itemAvg)/2
+				agentLow = agentLow + math.Abs(agentLow-itemAvg)*bigPercent
 				//Bring it back down if too big.
 				for agentLow >= agentHigh {
-					agentLow = agentLow - math.Abs(agentLow-itemAvg)/2
+					agentLow = agentLow - math.Abs(agentLow-itemAvg)*bigPercent
 				}
 			} else {
 				//Overaverage!  Raise just a bit.
-				agentHigh = agentHigh + math.Abs(agentHigh-itemAvg)/5
-				agentLow = agentLow + math.Abs(agentLow-itemAvg)/5
+				agentHigh = agentHigh + math.Abs(agentHigh-itemAvg)*littlePercent
+				agentLow = agentLow + math.Abs(agentLow-itemAvg)*littlePercent
 			}
 
 		} else {
@@ -500,15 +503,15 @@ func agentUpdate(agent *traderAgent, askSlice *[]asks, bidSlice *[]bids) {
 			//Are we lower than the average?  Lower it down a little bit.
 			if agentAvg >= itemAvg {
 				//Agent Average over Average - Lower a lot!
-				agentHigh = agentHigh - math.Abs(agentHigh-itemAvg)/2
-				agentLow = agentLow - math.Abs(agentLow-itemAvg)/2
+				agentHigh = agentHigh - math.Abs(agentHigh-itemAvg)*bigPercent
+				agentLow = agentLow - math.Abs(agentLow-itemAvg)*bigPercent
 				for agentLow >= agentHigh {
-					agentLow = agentLow - math.Abs(agentLow-itemAvg)/2
+					agentLow = agentLow - math.Abs(agentLow-itemAvg)*bigPercent
 				}
 			} else {
 				//Under Average
-				agentHigh = agentHigh - math.Abs(agentHigh-itemAvg)/5
-				agentLow = agentLow - math.Abs(agentLow-itemAvg)/5
+				agentHigh = agentHigh - math.Abs(agentHigh-itemAvg)*littlePercent
+				agentLow = agentLow - math.Abs(agentLow-itemAvg)*littlePercent
 			}
 		}
 		if agentHigh < askSet.offeredAsk.item.averagePrice {
@@ -538,15 +541,15 @@ func agentUpdate(agent *traderAgent, askSlice *[]asks, bidSlice *[]bids) {
 			//Consider lowering our prices - a lot if we're over the average, a little if we're under.
 			if agentAvg >= itemAvg {
 				//Agent Average over Average - Lower a lot!
-				agentHigh = agentHigh - math.Abs(agentHigh-itemAvg)/2
-				agentLow = agentLow - math.Abs(agentLow-itemAvg)/2
+				agentHigh = agentHigh - math.Abs(agentHigh-itemAvg)*bigPercent
+				agentLow = agentLow - math.Abs(agentLow-itemAvg)*bigPercent
 				for agentLow >= agentHigh {
-					agentLow = agentLow - math.Abs(agentLow-itemAvg)/2
+					agentLow = agentLow - math.Abs(agentLow-itemAvg)*bigPercent
 				}
 			} else {
 				//Under Average
-				agentHigh = agentHigh - math.Abs(agentHigh-itemAvg)/5
-				agentLow = agentLow - math.Abs(agentLow-itemAvg)/5
+				agentHigh = agentHigh - math.Abs(agentHigh-itemAvg)*littlePercent
+				agentLow = agentLow - math.Abs(agentLow-itemAvg)*littlePercent
 			}
 
 		} else {
@@ -556,22 +559,28 @@ func agentUpdate(agent *traderAgent, askSlice *[]asks, bidSlice *[]bids) {
 			if agentAvg <= itemAvg {
 				//Agent Average under Average - Raise a lot!
 				if agentHigh <= itemAvg {
-					agentHigh = itemAvg + itemAvg/2
+					agentHigh = itemAvg + itemAvg*bigPercent
 				} else {
 					//Half again more.
-					agentHigh = agentHigh + math.Abs(agentHigh-itemAvg)/2
+					agentHigh = agentHigh + math.Abs(agentHigh-itemAvg)*bigPercent
 				}
 				//Half the distance more.
-				agentLow = agentLow + math.Abs(agentLow-itemAvg)/2
+				agentLow = agentLow + math.Abs(agentLow-itemAvg)*bigPercent
 				//Bring it back down if too big.
 				for agentLow >= agentHigh {
-					agentLow = agentLow - math.Abs(agentLow-itemAvg)/2
+					agentLow = agentLow - math.Abs(agentLow-itemAvg)*bigPercent
 				}
 			} else {
 				//Overaverage!  Raise just a bit.
-				agentHigh = agentHigh + math.Abs(agentHigh-itemAvg)/5
-				agentLow = agentLow + math.Abs(agentLow-itemAvg)/5
+				agentHigh = agentHigh + math.Abs(agentHigh-itemAvg)*littlePercent
+				agentLow = agentLow + math.Abs(agentLow-itemAvg)*littlePercent
 			}
+		}
+		if agentHigh < bidSet.offeredBid.item.averagePrice {
+			agentHigh = bidSet.offeredBid.item.averagePrice
+		}
+		if agentLow < 0 {
+			agentLow = 0.5 //Totally arbitrary
 		}
 		var agentPriceBelief = agent.priceBelief[bidSet.offeredBid.item]
 		agentPriceBelief.high = agentHigh
@@ -758,11 +767,11 @@ func main() {
 	//blacksmith := makeBlacksmith(allCommodities, &blacksmithProdSet)
 
 	//Set the cohort sizes
-	numFarmers := 5
-	numMiners := 5
-	numRefiners := 5
-	numWoodcutters := 5
-	numBlacksmiths := 5
+	numFarmers := 500
+	numMiners := 500
+	numRefiners := 500
+	numWoodcutters := 500
+	numBlacksmiths := 500
 	totalTraders := numFarmers + numMiners + numRefiners + numWoodcutters + numBlacksmiths
 	askChannels := make([]chan []asks, totalTraders)
 	bidChannels := make([]chan []bids, totalTraders)
@@ -821,6 +830,9 @@ func main() {
 
 			//Check all the ask channels
 			var tempAsksStorage []asks
+			for com, _ := range asksTyped {
+				asksTyped[com] = nil
+			}
 			for chindex, channel := range askChannels {
 				select {
 				case tempAsksStorage = <-channel:
@@ -835,6 +847,9 @@ func main() {
 				}
 			}
 			var tempBidsStorage []bids
+			for com, _ := range bidsTyped {
+				bidsTyped[com] = nil
+			}
 			for chindex, channel := range bidChannels {
 				select {
 				case tempBidsStorage = <-channel:
