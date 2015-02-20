@@ -10,6 +10,9 @@ import (
 	"time"
 )
 
+//Flags!
+var grantGoods bool
+
 //A commodity is traded by traderAgents and used in production sets.
 //name - name of the commodity
 //averagePrice - current average price of the commodity
@@ -397,8 +400,8 @@ func generateAsks(agent *traderAgent) []asks {
 			//So, given the average price on the exchange, what should we sell for?
 			//This instantiation sells for the average of my price belief and the
 			//exchange average.
-			askBuild.offeredAsk.sellFor = (agent.priceBelief[com].high + agent.priceBelief[com].low +
-				com.averagePrice) / 3
+			askBuild.offeredAsk.sellFor = (agent.priceBelief[com].high + agent.priceBelief[com].low) / 2
+			//(agent.priceBelief[com].high + agent.priceBelief[com].low + com.averagePrice) / 3
 			askSlice = append(askSlice, askBuild)
 		}
 	}
@@ -449,8 +452,8 @@ func generateBids(agent *traderAgent) []bids {
 		//So, given the average price on the exchange, what should we buy at?
 		//This instantiation buys at the average of my price belief and the
 		//exchange average.
-		bidBuild.offeredBid.buyFor = (agent.priceBelief[com].high + agent.priceBelief[com].low +
-			com.averagePrice) / 3
+		bidBuild.offeredBid.buyFor = (agent.priceBelief[com].high + agent.priceBelief[com].low) / 2
+		//(agent.priceBelief[com].high + agent.priceBelief[com].low + com.averagePrice) / 3
 		bidSlice = append(bidSlice, bidBuild)
 	}
 
@@ -465,8 +468,8 @@ func generateBids(agent *traderAgent) []bids {
 func agentUpdate(agent *traderAgent, askSlice *[]asks, bidSlice *[]bids) {
 	//Go through all the asks and tally up the sales/remove items from inventory.
 	//If not accepted, lower sales price internal estimate
-	bigPercent := 0.5
-	littlePercent := 0.1
+	bigPercent := 0.2
+	littlePercent := 0.01
 	for _, askSet := range *askSlice {
 		agentHigh := agent.priceBelief[askSet.offeredAsk.item].high
 		agentLow := agent.priceBelief[askSet.offeredAsk.item].low
@@ -474,27 +477,27 @@ func agentUpdate(agent *traderAgent, askSlice *[]asks, bidSlice *[]bids) {
 		itemAvg := askSet.offeredAsk.item.averagePrice
 		if askSet.numberAccepted > 0 {
 			//AskSet was accepted!  Take out that much inventory and add cash.
+			fmt.Printf("Ask Accepted! %v units of %v for %v\n", askSet.numberAccepted, askSet.offeredAsk.item.name, askSet.offeredAsk.sellFor)
 			agent.funds = agent.funds + (float64(askSet.offeredAsk.quantity) * float64(askSet.numberAccepted) * askSet.offeredAsk.sellFor)
 			agent.inventory[askSet.offeredAsk.item] = agent.inventory[askSet.offeredAsk.item] - (askSet.offeredAsk.quantity * askSet.numberAccepted)
 			//Consider raising our prices - a lot if we're under the average, a little if we're over.
 			if agentAvg <= itemAvg {
 				//Agent Average under Average - Raise a lot!
-				if agentHigh <= itemAvg {
-					agentHigh = itemAvg + itemAvg*littlePercent
-				} else {
-					//Half again more.
-					agentHigh = agentHigh + math.Abs(agentHigh-itemAvg)*bigPercent
-				}
-				//Half the distance more.
+				agentHigh = agentHigh + math.Abs(agentHigh-itemAvg)*bigPercent
 				agentLow = agentLow + math.Abs(agentLow-itemAvg)*bigPercent
 				//Bring it back down if too big.
 				for agentLow >= agentHigh {
 					agentLow = agentLow - math.Abs(agentLow-itemAvg)*bigPercent
+					fmt.Println("INVERT1")
 				}
 			} else {
 				//Overaverage!  Raise just a bit.
 				agentHigh = agentHigh + math.Abs(agentHigh-itemAvg)*littlePercent
 				agentLow = agentLow + math.Abs(agentLow-itemAvg)*littlePercent
+				for agentLow >= agentHigh {
+					agentLow = agentLow - math.Abs(agentLow-itemAvg)*littlePercent
+					fmt.Println("INVERT2")
+				}
 			}
 
 		} else {
@@ -507,16 +510,21 @@ func agentUpdate(agent *traderAgent, askSlice *[]asks, bidSlice *[]bids) {
 				agentLow = agentLow - math.Abs(agentLow-itemAvg)*bigPercent
 				for agentLow >= agentHigh {
 					agentLow = agentLow - math.Abs(agentLow-itemAvg)*bigPercent
+					fmt.Println("INVERT3")
 				}
 			} else {
 				//Under Average
 				agentHigh = agentHigh - math.Abs(agentHigh-itemAvg)*littlePercent
 				agentLow = agentLow - math.Abs(agentLow-itemAvg)*littlePercent
+				for agentLow >= agentHigh {
+					agentLow = agentLow - math.Abs(agentLow-itemAvg)*littlePercent
+					//fmt.Println("INVERT4")
+				}
 			}
 		}
-		if agentHigh < askSet.offeredAsk.item.averagePrice {
-			agentHigh = askSet.offeredAsk.item.averagePrice
-		}
+		//if agentHigh < askSet.offeredAsk.item.averagePrice {
+		//	agentHigh = askSet.offeredAsk.item.averagePrice
+		//}
 		if agentLow < 0 {
 			agentLow = 0.5 //Totally arbitrary
 		}
@@ -545,11 +553,16 @@ func agentUpdate(agent *traderAgent, askSlice *[]asks, bidSlice *[]bids) {
 				agentLow = agentLow - math.Abs(agentLow-itemAvg)*bigPercent
 				for agentLow >= agentHigh {
 					agentLow = agentLow - math.Abs(agentLow-itemAvg)*bigPercent
+					fmt.Println("INVERT5")
 				}
 			} else {
 				//Under Average
 				agentHigh = agentHigh - math.Abs(agentHigh-itemAvg)*littlePercent
 				agentLow = agentLow - math.Abs(agentLow-itemAvg)*littlePercent
+				for agentLow >= agentHigh {
+					agentLow = agentLow - math.Abs(agentLow-itemAvg)*littlePercent
+					fmt.Println("INVERT6")
+				}
 			}
 
 		} else {
@@ -558,27 +571,26 @@ func agentUpdate(agent *traderAgent, askSlice *[]asks, bidSlice *[]bids) {
 			//Are we lower than the average?  Raise it a lot
 			if agentAvg <= itemAvg {
 				//Agent Average under Average - Raise a lot!
-				if agentHigh <= itemAvg {
-					agentHigh = itemAvg + itemAvg*bigPercent
-				} else {
-					//Half again more.
-					agentHigh = agentHigh + math.Abs(agentHigh-itemAvg)*bigPercent
-				}
-				//Half the distance more.
+				agentHigh = agentHigh + math.Abs(agentHigh-itemAvg)*bigPercent
 				agentLow = agentLow + math.Abs(agentLow-itemAvg)*bigPercent
 				//Bring it back down if too big.
 				for agentLow >= agentHigh {
 					agentLow = agentLow - math.Abs(agentLow-itemAvg)*bigPercent
+					fmt.Println("INVERT7")
 				}
 			} else {
 				//Overaverage!  Raise just a bit.
 				agentHigh = agentHigh + math.Abs(agentHigh-itemAvg)*littlePercent
 				agentLow = agentLow + math.Abs(agentLow-itemAvg)*littlePercent
+				for agentLow >= agentHigh {
+					agentLow = agentLow - math.Abs(agentLow-itemAvg)*littlePercent
+					fmt.Println("INVERT8")
+				}
 			}
 		}
-		if agentHigh < bidSet.offeredBid.item.averagePrice {
-			agentHigh = bidSet.offeredBid.item.averagePrice
-		}
+		//if agentHigh < bidSet.offeredBid.item.averagePrice {
+		//	agentHigh = bidSet.offeredBid.item.averagePrice
+		//}
 		if agentLow < 0 {
 			agentLow = 0.5 //Totally arbitrary
 		}
@@ -1082,8 +1094,10 @@ func makeFarmer(commodityList map[string]*commodity, prodSet *productionSet) tra
 	farmerOut.role = "Farmer"
 	farmerOut.funds = 50 + (rand.Float64() * 50)
 	farmerOut.inventory = make(map[*commodity]int)
-	farmerOut.inventory[commodityList["Tools"]] = rand.Intn(2)
-	farmerOut.inventory[commodityList["Wood"]] = rand.Intn(4) + 2
+	if grantGoods {
+		farmerOut.inventory[commodityList["Tools"]] = rand.Intn(2)
+		farmerOut.inventory[commodityList["Wood"]] = rand.Intn(4) + 2
+	}
 	farmerOut.job = prodSet
 	farmerOut.priceBelief = randomPriceBelief(commodityList)
 	farmerOut.riskAversion = rand.Intn(4) + 1
@@ -1095,8 +1109,10 @@ func makeMiner(commodityList map[string]*commodity, prodSet *productionSet) trad
 	minerOut.role = "Miner"
 	minerOut.funds = 50 + (rand.Float64() * 50)
 	minerOut.inventory = make(map[*commodity]int)
-	minerOut.inventory[commodityList["Tools"]] = rand.Intn(2)
-	minerOut.inventory[commodityList["Food"]] = rand.Intn(4) + 2
+	if grantGoods {
+		minerOut.inventory[commodityList["Tools"]] = rand.Intn(2)
+		minerOut.inventory[commodityList["Food"]] = rand.Intn(4) + 2
+	}
 	minerOut.job = prodSet
 	minerOut.priceBelief = randomPriceBelief(commodityList)
 	minerOut.riskAversion = rand.Intn(4) + 1
@@ -1108,9 +1124,11 @@ func makeRefiner(commodityList map[string]*commodity, prodSet *productionSet) tr
 	refinerOut.role = "Refiner"
 	refinerOut.funds = 50 + (rand.Float64() * 50)
 	refinerOut.inventory = make(map[*commodity]int)
-	refinerOut.inventory[commodityList["Ore"]] = 2 + rand.Intn(3)
-	refinerOut.inventory[commodityList["Food"]] = rand.Intn(4) + 2
-	refinerOut.inventory[commodityList["Tools"]] = rand.Intn(2)
+	if grantGoods {
+		refinerOut.inventory[commodityList["Ore"]] = 2 + rand.Intn(3)
+		refinerOut.inventory[commodityList["Food"]] = rand.Intn(4) + 2
+		refinerOut.inventory[commodityList["Tools"]] = rand.Intn(2)
+	}
 	refinerOut.job = prodSet
 	refinerOut.priceBelief = randomPriceBelief(commodityList)
 	refinerOut.riskAversion = rand.Intn(4) + 1
@@ -1122,8 +1140,10 @@ func makeWoodcutter(commodityList map[string]*commodity, prodSet *productionSet)
 	woodcutterOut.role = "Woodcutter"
 	woodcutterOut.funds = 50 + (rand.Float64() * 50)
 	woodcutterOut.inventory = make(map[*commodity]int)
-	woodcutterOut.inventory[commodityList["Tools"]] = rand.Intn(2)
-	woodcutterOut.inventory[commodityList["Food"]] = rand.Intn(4) + 2
+	if grantGoods {
+		woodcutterOut.inventory[commodityList["Tools"]] = rand.Intn(2)
+		woodcutterOut.inventory[commodityList["Food"]] = rand.Intn(4) + 2
+	}
 	woodcutterOut.job = prodSet
 	woodcutterOut.priceBelief = randomPriceBelief(commodityList)
 	woodcutterOut.riskAversion = rand.Intn(4) + 1
@@ -1135,8 +1155,10 @@ func makeBlacksmith(commodityList map[string]*commodity, prodSet *productionSet)
 	blacksmithOut.role = "Blacksmith"
 	blacksmithOut.funds = 50 + (rand.Float64() * 50)
 	blacksmithOut.inventory = make(map[*commodity]int)
-	blacksmithOut.inventory[commodityList["Metal"]] = 2 + rand.Intn(3)
-	blacksmithOut.inventory[commodityList["Food"]] = rand.Intn(4) + 2
+	if grantGoods {
+		blacksmithOut.inventory[commodityList["Metal"]] = 2 + rand.Intn(3)
+		blacksmithOut.inventory[commodityList["Food"]] = rand.Intn(4) + 2
+	}
 	blacksmithOut.job = prodSet
 	blacksmithOut.priceBelief = randomPriceBelief(commodityList)
 	blacksmithOut.riskAversion = rand.Intn(4) + 1
@@ -1148,4 +1170,6 @@ func init() {
 	runtime.GOMAXPROCS(runtime.NumCPU())
 	fmt.Printf("Number of CPUS: %d\n", runtime.NumCPU())
 	rand.Seed(time.Now().UTC().UnixNano())
+	//Flags!
+	grantGoods = true
 }
