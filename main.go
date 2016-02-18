@@ -624,7 +624,7 @@ func main() {
 	wood.averagePrice = 3
 	var tools commodity
 	tools.name = "Tools"
-	tools.averagePrice = 12
+	tools.averagePrice = 3
 	var food commodity
 	food.name = "Food"
 	food.averagePrice = 3
@@ -633,7 +633,7 @@ func main() {
 	ore.averagePrice = 3
 	var metal commodity
 	metal.name = "Metal"
-	metal.averagePrice = 6
+	metal.averagePrice = 3
 
 	allCommodities := make(map[string]*commodity)
 	allCommodities["Wood"] = &wood
